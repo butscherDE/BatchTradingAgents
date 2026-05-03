@@ -81,6 +81,9 @@ class MessageBuffer:
         self.report_sections = {}
         self.selected_analysts = []
         self._processed_message_ids = set()
+        self._orig_add_message = self.add_message
+        self._orig_add_tool_call = self.add_tool_call
+        self._orig_update_report_section = self.update_report_section
 
     def init_for_analysis(self, selected_analysts):
         """Initialize agent status and report sections based on selected analysts.
@@ -108,6 +111,11 @@ class MessageBuffer:
         for section, (analyst_key, _) in self.REPORT_SECTIONS.items():
             if analyst_key is None or analyst_key in self.selected_analysts:
                 self.report_sections[section] = None
+
+        # Restore original undecorated methods so decorators don't stack
+        self.add_message = self._orig_add_message
+        self.add_tool_call = self._orig_add_tool_call
+        self.update_report_section = self._orig_update_report_section
 
         # Reset other state
         self.current_report = None
@@ -926,11 +934,23 @@ def format_tool_args(args, max_length=80) -> str:
         return result[:max_length - 3] + "..."
     return result
 
-def run_analysis(checkpoint: bool = False):
-    # First get all user selections
-    selections = get_user_selections()
+DEPTH_MAP = {"shallow": 1, "medium": 3, "deep": 5}
 
-    # Create config with selected research depth
+PROVIDER_BACKEND_URLS = {
+    "openai": "https://api.openai.com/v1",
+    "google": None,
+    "anthropic": "https://api.anthropic.com/",
+    "xai": "https://api.x.ai/v1",
+    "deepseek": "https://api.deepseek.com",
+    "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "glm": "https://open.bigmodel.cn/api/paas/v4/",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "azure": None,
+    "ollama": "http://localhost:11434/v1",
+}
+
+
+def _build_config(selections, checkpoint=False):
     config = DEFAULT_CONFIG.copy()
     config["max_debate_rounds"] = selections["research_depth"]
     config["max_risk_discuss_rounds"] = selections["research_depth"]
@@ -938,36 +958,29 @@ def run_analysis(checkpoint: bool = False):
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]
     config["llm_provider"] = selections["llm_provider"].lower()
-    # Provider-specific thinking configuration
     config["google_thinking_level"] = selections.get("google_thinking_level")
     config["openai_reasoning_effort"] = selections.get("openai_reasoning_effort")
     config["anthropic_effort"] = selections.get("anthropic_effort")
     config["output_language"] = selections.get("output_language", "English")
     config["checkpoint_enabled"] = checkpoint
+    return config
 
-    # Create stats callback handler for tracking LLM/tool calls
+
+def _run_single_ticker(
+    ticker,
+    analysis_date,
+    selected_analyst_keys,
+    config,
+    graph,
+    output_dir=None,
+):
     stats_handler = StatsCallbackHandler()
 
-    # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
-    selected_set = {analyst.value for analyst in selections["analysts"]}
-    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
-
-    # Initialize the graph with callbacks bound to LLMs
-    graph = TradingAgentsGraph(
-        selected_analyst_keys,
-        config=config,
-        debug=True,
-        callbacks=[stats_handler],
-    )
-
-    # Initialize message buffer with selected analysts
     message_buffer.init_for_analysis(selected_analyst_keys)
 
-    # Track start time for elapsed display
     start_time = time.time()
 
-    # Create result directory
-    results_dir = Path(config["results_dir"]) / selections["ticker"] / selections["analysis_date"]
+    results_dir = Path(config["results_dir"]) / ticker / analysis_date
     results_dir.mkdir(parents=True, exist_ok=True)
     report_dir = results_dir / "reports"
     report_dir.mkdir(parents=True, exist_ok=True)
@@ -980,11 +993,11 @@ def run_analysis(checkpoint: bool = False):
         def wrapper(*args, **kwargs):
             func(*args, **kwargs)
             timestamp, message_type, content = obj.messages[-1]
-            content = content.replace("\n", " ")  # Replace newlines with spaces
+            content = content.replace("\n", " ")
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{timestamp} [{message_type}] {content}\n")
         return wrapper
-    
+
     def save_tool_call_decorator(obj, func_name):
         func = getattr(obj, func_name)
         @wraps(func)
@@ -1014,47 +1027,32 @@ def run_analysis(checkpoint: bool = False):
     message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
     message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
 
-    # Now start the display layout
     layout = create_layout()
 
     with Live(layout, refresh_per_second=4) as live:
-        # Initial display
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-        # Add initial messages
-        message_buffer.add_message("System", f"Selected ticker: {selections['ticker']}")
-        message_buffer.add_message(
-            "System", f"Analysis date: {selections['analysis_date']}"
-        )
+        message_buffer.add_message("System", f"Selected ticker: {ticker}")
+        message_buffer.add_message("System", f"Analysis date: {analysis_date}")
         message_buffer.add_message(
             "System",
-            f"Selected analysts: {', '.join(analyst.value for analyst in selections['analysts'])}",
+            f"Selected analysts: {', '.join(selected_analyst_keys)}",
         )
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-        # Update agent status to in_progress for the first analyst
-        first_analyst = f"{selections['analysts'][0].value.capitalize()} Analyst"
+        first_analyst_key = selected_analyst_keys[0]
+        first_analyst = f"{first_analyst_key.capitalize()} Analyst"
         message_buffer.update_agent_status(first_analyst, "in_progress")
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-        # Create spinner text
-        spinner_text = (
-            f"Analyzing {selections['ticker']} on {selections['analysis_date']}..."
-        )
+        spinner_text = f"Analyzing {ticker} on {analysis_date}..."
         update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
 
-        # Initialize state and get graph args with callbacks
-        init_agent_state = graph.propagator.create_initial_state(
-            selections["ticker"], selections["analysis_date"]
-        )
-        # Pass callbacks to graph config for tool execution tracking
-        # (LLM tracking is handled separately via LLM constructor)
+        init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
-        # Stream the analysis
         trace = []
         for chunk in graph.graph.stream(init_agent_state, **args):
-            # Process all messages in chunk, deduplicating by message ID
             for message in chunk.get("messages", []):
                 msg_id = getattr(message, "id", None)
                 if msg_id is not None:
@@ -1073,17 +1071,14 @@ def run_analysis(checkpoint: bool = False):
                         else:
                             message_buffer.add_tool_call(tool_call.name, tool_call.args)
 
-            # Update analyst statuses based on report state (runs on every chunk)
             update_analyst_statuses(message_buffer, chunk)
 
-            # Research Team - Handle Investment Debate State
             if chunk.get("investment_debate_state"):
                 debate_state = chunk["investment_debate_state"]
                 bull_hist = debate_state.get("bull_history", "").strip()
                 bear_hist = debate_state.get("bear_history", "").strip()
                 judge = debate_state.get("judge_decision", "").strip()
 
-                # Only update status when there's actual content
                 if bull_hist or bear_hist:
                     update_research_team_status("in_progress")
                 if bull_hist:
@@ -1101,7 +1096,6 @@ def run_analysis(checkpoint: bool = False):
                     update_research_team_status("completed")
                     message_buffer.update_agent_status("Trader", "in_progress")
 
-            # Trading Team
             if chunk.get("trader_investment_plan"):
                 message_buffer.update_report_section(
                     "trader_investment_plan", chunk["trader_investment_plan"]
@@ -1110,7 +1104,6 @@ def run_analysis(checkpoint: bool = False):
                     message_buffer.update_agent_status("Trader", "completed")
                     message_buffer.update_agent_status("Aggressive Analyst", "in_progress")
 
-            # Risk Management Team - Handle Risk Debate State
             if chunk.get("risk_debate_state"):
                 risk_state = chunk["risk_debate_state"]
                 agg_hist = risk_state.get("aggressive_history", "").strip()
@@ -1147,34 +1140,65 @@ def run_analysis(checkpoint: bool = False):
                         message_buffer.update_agent_status("Neutral Analyst", "completed")
                         message_buffer.update_agent_status("Portfolio Manager", "completed")
 
-            # Update the display
             update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
             trace.append(chunk)
 
-        # Get final state and decision
         final_state = trace[-1]
         decision = graph.process_signal(final_state["final_trade_decision"])
 
-        # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
             message_buffer.update_agent_status(agent, "completed")
 
-        message_buffer.add_message(
-            "System", f"Completed analysis for {selections['analysis_date']}"
-        )
+        message_buffer.add_message("System", f"Completed analysis for {analysis_date}")
 
-        # Update final report sections
         for section in message_buffer.report_sections.keys():
             if section in final_state:
                 message_buffer.update_report_section(section, final_state[section])
 
         update_display(layout, stats_handler=stats_handler, start_time=start_time)
 
-    # Post-analysis prompts (outside Live context for clean interaction)
+    elapsed = time.time() - start_time
+
+    if output_dir is not None:
+        save_path = Path(output_dir)
+        save_report_to_disk(final_state, ticker, save_path)
+        console.print(f"[green]Report saved to:[/green] {save_path.resolve()}")
+
+    return {
+        "final_state": final_state,
+        "decision": decision,
+        "elapsed": elapsed,
+        "stats": stats_handler.get_stats(),
+    }
+
+
+def run_analysis(checkpoint: bool = False):
+    selections = get_user_selections()
+    config = _build_config(selections, checkpoint)
+
+    selected_set = {analyst.value for analyst in selections["analysts"]}
+    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+
+    stats_handler = StatsCallbackHandler()
+    graph = TradingAgentsGraph(
+        selected_analyst_keys,
+        config=config,
+        debug=True,
+        callbacks=[stats_handler],
+    )
+
+    result = _run_single_ticker(
+        ticker=selections["ticker"],
+        analysis_date=selections["analysis_date"],
+        selected_analyst_keys=selected_analyst_keys,
+        config=config,
+        graph=graph,
+    )
+    final_state = result["final_state"]
+
     console.print("\n[bold cyan]Analysis Complete![/bold cyan]\n")
 
-    # Prompt to save report
     save_choice = typer.prompt("Save report?", default="Y").strip().upper()
     if save_choice in ("Y", "YES", ""):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1186,15 +1210,43 @@ def run_analysis(checkpoint: bool = False):
         save_path = Path(save_path_str)
         try:
             report_file = save_report_to_disk(final_state, selections["ticker"], save_path)
-            console.print(f"\n[green]✓ Report saved to:[/green] {save_path.resolve()}")
+            console.print(f"\n[green]Report saved to:[/green] {save_path.resolve()}")
             console.print(f"  [dim]Complete report:[/dim] {report_file.name}")
         except Exception as e:
             console.print(f"[red]Error saving report: {e}[/red]")
 
-    # Prompt to display full report
     display_choice = typer.prompt("\nDisplay full report on screen?", default="Y").strip().upper()
     if display_choice in ("Y", "YES", ""):
         display_complete_report(final_state)
+
+
+def _print_batch_summary(results, output_dir):
+    table = Table(
+        title="Batch Analysis Summary",
+        show_header=True,
+        header_style="bold magenta",
+        box=box.ROUNDED,
+    )
+    table.add_column("Ticker", style="cyan", justify="center")
+    table.add_column("Status", justify="center")
+    table.add_column("Decision", justify="center")
+    table.add_column("Time", justify="right")
+
+    succeeded = 0
+    for ticker, status, detail, elapsed in results:
+        if status == "SUCCESS":
+            succeeded += 1
+            status_str = "[green]SUCCESS[/green]"
+            time_str = f"{elapsed:.0f}s"
+        else:
+            status_str = "[red]FAILED[/red]"
+            time_str = "-"
+        table.add_row(ticker, status_str, str(detail), time_str)
+
+    console.print()
+    console.print(table)
+    console.print(f"\n[bold]{succeeded}/{len(results)} tickers completed successfully[/bold]")
+    console.print(f"Reports saved to: {Path(output_dir).resolve()}")
 
 
 @app.command()
@@ -1215,6 +1267,103 @@ def analyze(
         n = clear_all_checkpoints(DEFAULT_CONFIG["data_cache_dir"])
         console.print(f"[yellow]Cleared {n} checkpoint(s).[/yellow]")
     run_analysis(checkpoint=checkpoint)
+
+
+@app.command()
+def batch(
+    tickers: list[str] = typer.Argument(
+        ..., help="One or more ticker symbols to analyze"
+    ),
+    output_dir: Path = typer.Option(
+        Path("./reports"), "--output-dir", "-o",
+        help="Directory to save all reports",
+    ),
+    date: Optional[str] = typer.Option(
+        None, "--date", "-d",
+        help="Analysis date (YYYY-MM-DD). Defaults to today.",
+    ),
+    depth: str = typer.Option(
+        "medium", "--depth",
+        help="Research depth: shallow, medium, or deep",
+    ),
+    provider: str = typer.Option(
+        "ollama", "--provider", "-p",
+        help="LLM provider (e.g., ollama, openai, anthropic)",
+    ),
+    quick_model: str = typer.Option(
+        "qwen3:8b", "--quick-model",
+        help="Model for quick/shallow thinking",
+    ),
+    deep_model: str = typer.Option(
+        "qwen3:32b", "--deep-model",
+        help="Model for deep thinking",
+    ),
+    language: str = typer.Option(
+        "English", "--language", "-l",
+        help="Output language for reports",
+    ),
+):
+    """Analyze multiple tickers sequentially with fixed parameters."""
+    analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
+    depth_value = DEPTH_MAP.get(depth.lower(), 3)
+    backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
+    all_analyst_keys = ["market", "social", "news", "fundamentals"]
+
+    selections = {
+        "research_depth": depth_value,
+        "llm_provider": provider.lower(),
+        "backend_url": backend_url,
+        "shallow_thinker": quick_model,
+        "deep_thinker": deep_model,
+        "google_thinking_level": None,
+        "openai_reasoning_effort": None,
+        "anthropic_effort": None,
+        "output_language": language,
+    }
+    config = _build_config(selections)
+
+    tickers = [normalize_ticker_symbol(t) for t in tickers]
+
+    console.print(Panel(
+        f"[bold]Batch Analysis[/bold]\n"
+        f"Tickers: {', '.join(tickers)}\n"
+        f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}\n"
+        f"Models: {quick_model} (quick) / {deep_model} (deep)\n"
+        f"Output: {output_dir.resolve()}",
+        border_style="green",
+    ))
+
+    graph = TradingAgentsGraph(
+        all_analyst_keys,
+        config=config,
+        debug=True,
+    )
+
+    results = []
+
+    for i, ticker in enumerate(tickers, 1):
+        console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
+        console.print(f"[bold cyan]Ticker {i}/{len(tickers)}: {ticker}[/bold cyan]")
+        console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
+
+        ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+        try:
+            result = _run_single_ticker(
+                ticker=ticker,
+                analysis_date=analysis_date,
+                selected_analyst_keys=all_analyst_keys,
+                config=config,
+                graph=graph,
+                output_dir=ticker_output,
+            )
+            results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+            console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
+        except Exception as e:
+            results.append((ticker, "FAILED", str(e), 0))
+            console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+
+    _print_batch_summary(results, output_dir)
 
 
 if __name__ == "__main__":
