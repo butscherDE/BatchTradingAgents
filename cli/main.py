@@ -1446,8 +1446,8 @@ def analyze(
 
 @app.command()
 def batch(
-    tickers: list[str] = typer.Argument(
-        ..., help="One or more ticker symbols to analyze"
+    tickers: Optional[list[str]] = typer.Argument(
+        None, help="Ticker symbols to analyze (inferred from --portfolio if omitted)"
     ),
     output_dir: Path = typer.Option(
         Path("./reports"), "--output-dir", "-o",
@@ -1485,8 +1485,43 @@ def batch(
         False, "--merge-only",
         help="Skip analysis; merge the latest existing reports for the given tickers",
     ),
+    portfolio_file: Optional[Path] = typer.Option(
+        None, "--portfolio",
+        help="CSV file with portfolio holdings (E*Trade export or generic format)",
+    ),
+    position: Optional[list[str]] = typer.Option(
+        None, "--position",
+        help="Inline position as TICKER:QUANTITY (repeatable)",
+    ),
+    cash: float = typer.Option(
+        0.0, "--cash",
+        help="Cash available for allocation",
+    ),
+    portfolio_format: Optional[str] = typer.Option(
+        None, "--portfolio-format",
+        help="Portfolio file format: etrade, generic (auto-detected if omitted)",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
+    from cli.portfolio import load_portfolio
+
+    portfolio = load_portfolio(
+        path=portfolio_file,
+        positions=position,
+        cash=cash,
+        format_override=portfolio_format,
+    )
+
+    if not tickers:
+        if portfolio and portfolio.holdings:
+            tickers = portfolio.ticker_symbols()
+            console.print(f"[cyan]Inferred tickers from portfolio: {', '.join(tickers)}[/cyan]")
+        else:
+            console.print("[red]No tickers provided and no portfolio to infer from. Aborting.[/red]")
+            raise typer.Exit(1)
+    else:
+        tickers = [normalize_ticker_symbol(t) for t in tickers]
+
     analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
     depth_value = DEPTH_MAP.get(depth.lower(), 3)
     backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
@@ -1505,17 +1540,21 @@ def batch(
     }
     config = _build_config(selections)
 
-    tickers = [normalize_ticker_symbol(t) for t in tickers]
+    portfolio_dict = portfolio.to_dict() if portfolio else None
 
     if merge_only:
         from tradingagents.agents.utils.rating import parse_rating
 
-        console.print(Panel(
-            f"[bold]Merge-Only Mode[/bold]\n"
-            f"Tickers: {', '.join(tickers)}\n"
+        merge_panel_lines = [
+            "[bold]Merge-Only Mode[/bold]",
+            f"Tickers: {', '.join(tickers)}",
             f"Looking for existing reports in: {output_dir.resolve()}",
-            border_style="yellow",
-        ))
+        ]
+        if portfolio:
+            merge_panel_lines.append(
+                f"Portfolio: {len(portfolio.holdings)} holdings, ${portfolio.cash:,.2f} cash"
+            )
+        console.print(Panel("\n".join(merge_panel_lines), border_style="yellow"))
 
         completed_states = []
         for ticker in tickers:
@@ -1538,21 +1577,25 @@ def batch(
             raise typer.Exit(1)
 
         console.print(f"\n[bold cyan]Generating cross-ticker comparison report for {len(completed_states)} tickers...[/bold cyan]")
-        report = _generate_merge_report(completed_states, config)
+        report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
         report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
         console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
         console.print()
         console.print(Panel(Markdown(report), title="Cross-Ticker Comparison", border_style="green"))
         return
 
-    console.print(Panel(
-        f"[bold]Batch Analysis[/bold]\n"
-        f"Tickers: {', '.join(tickers)}\n"
-        f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}\n"
-        f"Models: {quick_model} (quick) / {deep_model} (deep)\n"
+    batch_panel_lines = [
+        "[bold]Batch Analysis[/bold]",
+        f"Tickers: {', '.join(tickers)}",
+        f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}",
+        f"Models: {quick_model} (quick) / {deep_model} (deep)",
         f"Output: {output_dir.resolve()}",
-        border_style="green",
-    ))
+    ]
+    if portfolio:
+        batch_panel_lines.append(
+            f"Portfolio: {len(portfolio.holdings)} holdings, ${portfolio.cash:,.2f} cash"
+        )
+    console.print(Panel("\n".join(batch_panel_lines), border_style="green"))
 
     graph = TradingAgentsGraph(
         all_analyst_keys,
@@ -1591,7 +1634,7 @@ def batch(
     if not no_merge and len(completed_states) >= 2:
         console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
         try:
-            report = _generate_merge_report(completed_states, config)
+            report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
             report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
             console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
             console.print()
