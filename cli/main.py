@@ -1249,6 +1249,181 @@ def _print_batch_summary(results, output_dir):
     console.print(f"Reports saved to: {Path(output_dir).resolve()}")
 
 
+FULL_REPORT_TICKER_LIMIT = 10
+
+
+def _build_ticker_section(ticker, decision, final_state, include_analyst_reports):
+    parts = [f"#### {ticker} — Rating: {decision}"]
+
+    if include_analyst_reports:
+        for label, key in [
+            ("Market Analysis", "market_report"),
+            ("Social Sentiment", "sentiment_report"),
+            ("News Analysis", "news_report"),
+            ("Fundamentals", "fundamentals_report"),
+        ]:
+            report = final_state.get(key, "").strip()
+            if report:
+                parts.append(f"**{label}:**\n{report}")
+
+    ftd = final_state.get("final_trade_decision", "(no decision available)")
+    parts.append(f"**Portfolio Manager Decision:**\n{ftd}")
+
+    return "\n\n".join(parts)
+
+
+def _generate_merge_report(ticker_results, config, portfolio=None):
+    from tradingagents.llm_clients import create_llm_client
+
+    llm_kwargs = {}
+    provider = config.get("llm_provider", "").lower()
+    if provider == "google" and config.get("google_thinking_level"):
+        llm_kwargs["thinking_level"] = config["google_thinking_level"]
+    elif provider == "openai" and config.get("openai_reasoning_effort"):
+        llm_kwargs["reasoning_effort"] = config["openai_reasoning_effort"]
+    elif provider == "anthropic" and config.get("anthropic_effort"):
+        llm_kwargs["effort"] = config["anthropic_effort"]
+
+    client = create_llm_client(
+        provider=config["llm_provider"],
+        model=config["deep_think_llm"],
+        base_url=config.get("backend_url"),
+        **llm_kwargs,
+    )
+    llm = client.get_llm()
+
+    include_analyst_reports = len(ticker_results) <= FULL_REPORT_TICKER_LIMIT
+
+    ticker_sections = [
+        _build_ticker_section(ticker, decision, final_state, include_analyst_reports)
+        for ticker, decision, final_state in ticker_results
+    ]
+    ticker_decisions = "\n\n---\n\n".join(ticker_sections)
+
+    if portfolio:
+        holdings_lines = "\n".join(
+            f"  - {sym}: {qty} shares" for sym, qty in portfolio["holdings"].items()
+        )
+        portfolio_context = (
+            f"**Current Portfolio:**\n{holdings_lines}\n"
+            f"  - Cash available: ${portfolio['cash']:,.2f}\n"
+        )
+        allocation_instruction = (
+            "Recommend concrete rebalancing actions given the current holdings and "
+            "available cash. Specify which positions to increase, decrease, or exit, "
+            "and how to deploy available cash."
+        )
+    else:
+        portfolio_context = (
+            "**Portfolio Context:** No existing holdings. "
+            "Assume fresh capital to be allocated across these tickers.\n"
+        )
+        allocation_instruction = (
+            "Recommend a percentage allocation of capital across these tickers. "
+            "Allocations must sum to 100% (cash is a valid allocation). "
+            "Justify the weighting relative to each ticker's rating and risk profile."
+        )
+
+    lang = config.get("output_language", "English")
+    language_instruction = "" if lang.strip().lower() == "english" else f" Write your entire response in {lang}."
+
+    report_type = "full analysis reports" if include_analyst_reports else "Portfolio Manager decisions"
+
+    prompt = f"""You are a Chief Investment Officer. You have received {report_type} for {len(ticker_results)} tickers. Each ticker was analyzed by a team of market, sentiment, news, and fundamentals analysts, followed by research debate, trading, and risk management — culminating in a Portfolio Manager decision.
+
+**Rating Scale Reference:**
+- **Buy**: Strong conviction to enter or add to position
+- **Overweight**: Favorable outlook, gradually increase exposure
+- **Hold**: Maintain current position, no action needed
+- **Underweight**: Reduce exposure, take partial profits
+- **Sell**: Exit position or avoid entry
+
+**Individual Ticker Analyses:**
+
+{ticker_decisions}
+
+---
+
+{portfolio_context}
+
+Produce a report with these sections:
+
+### 1. Cross-Ticker Dependencies and Contradictions
+Identify cases where one ticker's bull/bear thesis conflicts with or depends on another's. Examples: competing for the same market, inverse correlation, shared supply chain risks, mutually exclusive macro assumptions. This is the most important section — surface hidden conflicts the per-ticker analyses could not see in isolation.
+
+### 2. Comparative Ranking
+Rank all tickers from most to least attractive, accounting for the dependencies found above. One-sentence justification each.
+
+### 3. Capital Allocation
+{allocation_instruction}
+
+### 4. Cross-Cutting Risks
+Risks affecting multiple tickers simultaneously (macro correlation, sector concentration, geopolitical exposure, interest rate sensitivity). Note which tickers share each risk and how it changes the portfolio's overall risk profile.
+
+### 5. Actionable Summary
+3-5 bullet action plan: what to buy first, what to avoid, what conditions would change the ranking.
+
+Be decisive. Ground every conclusion in specific evidence from the analyst reports and decisions above.{language_instruction}"""
+
+    response = llm.invoke(prompt)
+    return response.content
+
+
+def _find_latest_report_dir(output_dir, ticker):
+    """Find the most recent report directory for a ticker.
+
+    Directories are named ``{TICKER}_{YYYY-MM-DD}`` and sorted lexicographically
+    so the last match is the most recent date.
+    """
+    output_path = Path(output_dir)
+    if not output_path.is_dir():
+        return None
+    candidates = sorted(
+        d for d in output_path.iterdir()
+        if d.is_dir() and d.name.startswith(f"{ticker}_")
+    )
+    return candidates[-1] if candidates else None
+
+
+def _load_report_from_disk(report_dir):
+    """Reconstruct a final_state dict from saved report files on disk."""
+    report_dir = Path(report_dir)
+    state = {}
+
+    file_map = {
+        "market_report": "1_analysts/market.md",
+        "sentiment_report": "1_analysts/sentiment.md",
+        "news_report": "1_analysts/news.md",
+        "fundamentals_report": "1_analysts/fundamentals.md",
+        "trader_investment_plan": "3_trading/trader.md",
+    }
+    for key, rel_path in file_map.items():
+        path = report_dir / rel_path
+        if path.is_file():
+            state[key] = path.read_text(encoding="utf-8")
+
+    decision_path = report_dir / "5_portfolio/decision.md"
+    if decision_path.is_file():
+        state["final_trade_decision"] = decision_path.read_text(encoding="utf-8")
+
+    return state
+
+
+def _save_merge_report(report, output_dir, tickers):
+    merge_dir = Path(output_dir) / "_comparison"
+    merge_dir.mkdir(parents=True, exist_ok=True)
+
+    header = (
+        f"# Cross-Ticker Comparison Report\n\n"
+        f"**Tickers:** {', '.join(tickers)}\n"
+        f"**Generated:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+    )
+
+    report_path = merge_dir / "merge_report.md"
+    report_path.write_text(header + report, encoding="utf-8")
+    return report_path
+
+
 @app.command()
 def analyze(
     checkpoint: bool = typer.Option(
@@ -1302,6 +1477,14 @@ def batch(
         "English", "--language", "-l",
         help="Output language for reports",
     ),
+    no_merge: bool = typer.Option(
+        False, "--no-merge",
+        help="Skip the cross-ticker merge report",
+    ),
+    merge_only: bool = typer.Option(
+        False, "--merge-only",
+        help="Skip analysis; merge the latest existing reports for the given tickers",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
@@ -1324,6 +1507,44 @@ def batch(
 
     tickers = [normalize_ticker_symbol(t) for t in tickers]
 
+    if merge_only:
+        from tradingagents.agents.utils.rating import parse_rating
+
+        console.print(Panel(
+            f"[bold]Merge-Only Mode[/bold]\n"
+            f"Tickers: {', '.join(tickers)}\n"
+            f"Looking for existing reports in: {output_dir.resolve()}",
+            border_style="yellow",
+        ))
+
+        completed_states = []
+        for ticker in tickers:
+            report_dir = _find_latest_report_dir(output_dir, ticker)
+            if report_dir is None:
+                console.print(f"[yellow]No report found for {ticker} — skipping[/yellow]")
+                continue
+
+            final_state = _load_report_from_disk(report_dir)
+            if not final_state.get("final_trade_decision"):
+                console.print(f"[yellow]{ticker}: report in {report_dir.name} has no portfolio decision — skipping[/yellow]")
+                continue
+
+            decision = parse_rating(final_state["final_trade_decision"])
+            completed_states.append((ticker, decision, final_state))
+            console.print(f"[green]Loaded {ticker} from {report_dir.name} — {decision}[/green]")
+
+        if len(completed_states) < 2:
+            console.print("[red]Need at least 2 ticker reports to generate a merge. Aborting.[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"\n[bold cyan]Generating cross-ticker comparison report for {len(completed_states)} tickers...[/bold cyan]")
+        report = _generate_merge_report(completed_states, config)
+        report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
+        console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
+        console.print()
+        console.print(Panel(Markdown(report), title="Cross-Ticker Comparison", border_style="green"))
+        return
+
     console.print(Panel(
         f"[bold]Batch Analysis[/bold]\n"
         f"Tickers: {', '.join(tickers)}\n"
@@ -1340,6 +1561,7 @@ def batch(
     )
 
     results = []
+    completed_states = []
 
     for i, ticker in enumerate(tickers, 1):
         console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
@@ -1358,12 +1580,26 @@ def batch(
                 output_dir=ticker_output,
             )
             results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+            completed_states.append((ticker, result["decision"], result["final_state"]))
             console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
         except Exception as e:
             results.append((ticker, "FAILED", str(e), 0))
             console.print(f"\n[red]Failed {ticker}: {e}[/red]")
 
     _print_batch_summary(results, output_dir)
+
+    if not no_merge and len(completed_states) >= 2:
+        console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
+        try:
+            report = _generate_merge_report(completed_states, config)
+            report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
+            console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
+            console.print()
+            console.print(Panel(Markdown(report), title="Cross-Ticker Comparison", border_style="green"))
+        except Exception as e:
+            console.print(f"\n[red]Merge report generation failed: {e}[/red]")
+    elif not no_merge and len(completed_states) < 2:
+        console.print("[yellow]Skipping merge report: need at least 2 successful analyses.[/yellow]")
 
 
 if __name__ == "__main__":
