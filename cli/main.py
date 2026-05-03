@@ -1369,6 +1369,46 @@ Be decisive. Ground every conclusion in specific evidence from the analyst repor
     return response.content
 
 
+def _find_latest_report_dir(output_dir, ticker):
+    """Find the most recent report directory for a ticker.
+
+    Directories are named ``{TICKER}_{YYYY-MM-DD}`` and sorted lexicographically
+    so the last match is the most recent date.
+    """
+    output_path = Path(output_dir)
+    if not output_path.is_dir():
+        return None
+    candidates = sorted(
+        d for d in output_path.iterdir()
+        if d.is_dir() and d.name.startswith(f"{ticker}_")
+    )
+    return candidates[-1] if candidates else None
+
+
+def _load_report_from_disk(report_dir):
+    """Reconstruct a final_state dict from saved report files on disk."""
+    report_dir = Path(report_dir)
+    state = {}
+
+    file_map = {
+        "market_report": "1_analysts/market.md",
+        "sentiment_report": "1_analysts/sentiment.md",
+        "news_report": "1_analysts/news.md",
+        "fundamentals_report": "1_analysts/fundamentals.md",
+        "trader_investment_plan": "3_trading/trader.md",
+    }
+    for key, rel_path in file_map.items():
+        path = report_dir / rel_path
+        if path.is_file():
+            state[key] = path.read_text(encoding="utf-8")
+
+    decision_path = report_dir / "5_portfolio/decision.md"
+    if decision_path.is_file():
+        state["final_trade_decision"] = decision_path.read_text(encoding="utf-8")
+
+    return state
+
+
 def _save_merge_report(report, output_dir, tickers):
     merge_dir = Path(output_dir) / "_comparison"
     merge_dir.mkdir(parents=True, exist_ok=True)
@@ -1441,6 +1481,10 @@ def batch(
         False, "--no-merge",
         help="Skip the cross-ticker merge report",
     ),
+    merge_only: bool = typer.Option(
+        False, "--merge-only",
+        help="Skip analysis; merge the latest existing reports for the given tickers",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
@@ -1462,6 +1506,44 @@ def batch(
     config = _build_config(selections)
 
     tickers = [normalize_ticker_symbol(t) for t in tickers]
+
+    if merge_only:
+        from tradingagents.agents.utils.rating import parse_rating
+
+        console.print(Panel(
+            f"[bold]Merge-Only Mode[/bold]\n"
+            f"Tickers: {', '.join(tickers)}\n"
+            f"Looking for existing reports in: {output_dir.resolve()}",
+            border_style="yellow",
+        ))
+
+        completed_states = []
+        for ticker in tickers:
+            report_dir = _find_latest_report_dir(output_dir, ticker)
+            if report_dir is None:
+                console.print(f"[yellow]No report found for {ticker} — skipping[/yellow]")
+                continue
+
+            final_state = _load_report_from_disk(report_dir)
+            if not final_state.get("final_trade_decision"):
+                console.print(f"[yellow]{ticker}: report in {report_dir.name} has no portfolio decision — skipping[/yellow]")
+                continue
+
+            decision = parse_rating(final_state["final_trade_decision"])
+            completed_states.append((ticker, decision, final_state))
+            console.print(f"[green]Loaded {ticker} from {report_dir.name} — {decision}[/green]")
+
+        if len(completed_states) < 2:
+            console.print("[red]Need at least 2 ticker reports to generate a merge. Aborting.[/red]")
+            raise typer.Exit(1)
+
+        console.print(f"\n[bold cyan]Generating cross-ticker comparison report for {len(completed_states)} tickers...[/bold cyan]")
+        report = _generate_merge_report(completed_states, config)
+        report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
+        console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
+        console.print()
+        console.print(Panel(Markdown(report), title="Cross-Ticker Comparison", border_style="green"))
+        return
 
     console.print(Panel(
         f"[bold]Batch Analysis[/bold]\n"
