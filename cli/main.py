@@ -1727,6 +1727,10 @@ def paper(
         False, "--dry-run",
         help="Show proposed trades but do not submit orders",
     ),
+    auto_execute: bool = typer.Option(
+        False, "--auto-execute",
+        help="Execute orders immediately without confirmation prompt",
+    ),
     skip_analysis: bool = typer.Option(
         False, "--skip-analysis",
         help="Skip ticker analysis; use latest existing reports from output dir",
@@ -1989,6 +1993,15 @@ def paper(
     if dry_run:
         console.print("\n[yellow]Dry-run mode — no orders submitted.[/yellow]")
         return
+
+    if not auto_execute:
+        confirm = typer.prompt(
+            f"\nSubmit {len(trade_plan.orders)} order(s) to Alpaca ({mode})? [y/N]",
+            default="N",
+        ).strip().upper()
+        if confirm not in ("Y", "YES"):
+            console.print("[yellow]Aborted — no orders submitted.[/yellow]")
+            return
 
     console.print(f"\n[bold cyan]Submitting {len(trade_plan.orders)} order(s) to Alpaca ({mode})...[/bold cyan]")
     order_dicts = [{"symbol": o.symbol, "side": o.side, "qty": int(o.qty)} for o in trade_plan.orders]

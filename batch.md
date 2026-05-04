@@ -218,6 +218,7 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--deep-model` | | `qwen3:32b` | Model for deep thinking |
 | `--language` | `-l` | `English` | Output language |
 | `--dry-run` | | `false` | Show trades but do not submit orders |
+| `--auto-execute` | | `false` | Execute orders immediately without confirmation |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
