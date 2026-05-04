@@ -1884,7 +1884,7 @@ def paper(
 
     console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
     try:
-        trade_plan = parse_orders(merge_report, portfolio_dict, quotes, pending, config, strategy=strategy_text)
+        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text)
     except Exception as e:
         console.print(f"[red]Trade plan generation failed: {e}[/red]")
         return

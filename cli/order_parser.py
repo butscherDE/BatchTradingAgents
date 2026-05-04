@@ -63,9 +63,19 @@ def parse_orders(
     llm = client.get_llm()
 
     holdings_lines = []
+    total_holdings_value = 0.0
     for sym, qty in portfolio_dict["holdings"].items():
-        holdings_lines.append(f"  - {sym}: {qty} shares")
+        price = quotes.get(sym)
+        if price is not None:
+            val = qty * price
+            total_holdings_value += val
+            holdings_lines.append(f"  - {sym}: {qty} shares @ ${price:,.2f} = ${val:,.2f}")
+        else:
+            holdings_lines.append(f"  - {sym}: {qty} shares (price unavailable)")
     holdings_str = "\n".join(holdings_lines) if holdings_lines else "  (no current holdings)"
+
+    cash = portfolio_dict["cash"]
+    total_portfolio_value = total_holdings_value + cash
 
     quotes_lines = []
     for sym, price in quotes.items():
@@ -83,7 +93,8 @@ def parse_orders(
 **Current Holdings:**
 {holdings_str}
 
-**Available Cash:** ${portfolio_dict['cash']:,.2f}
+**Cash:** ${cash:,.2f}
+**Total Portfolio Value:** ${total_portfolio_value:,.2f}
 
 {pending_str}
 
@@ -99,8 +110,8 @@ def parse_orders(
 **Rules:**
 - Only output orders that the analysis report supports. If the report says Hold, do not trade that ticker.
 - Sell quantity must not exceed the current holding quantity for that symbol.
-- Cash from sell orders is available to fund buy orders. Compute your effective buying power as: available cash + total estimated sell proceeds. Total buy cost must not exceed this effective buying power.
-- Deploy the effective buying power aggressively across the report's Buy-rated tickers, proportional to their conviction ranking. Do not leave large cash reserves unless the report explicitly recommends it.
+- IMPORTANT: Proceeds from sells are immediately available for buys. If you sell $200,000 of AAPL and have $27,000 cash, you have $227,000 to deploy on buys. You MUST compute buy quantities against this effective buying power, not just the starting cash.
+- Target deploying ≥90% of effective buying power (cash + sell proceeds) into Buy/Overweight-rated tickers. Allocate proportionally to conviction ranking. Leaving more than 10% in cash requires explicit justification.
 - Do not duplicate or conflict with any pending orders listed above.
 - Use whole share quantities only.
 - If no action is warranted, return an empty orders list.
