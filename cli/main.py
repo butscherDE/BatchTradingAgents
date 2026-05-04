@@ -1690,6 +1690,14 @@ def paper(
         "English", "--language", "-l",
         help="Output language for reports",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run",
+        help="Show proposed trades but do not submit orders",
+    ),
+    skip_analysis: bool = typer.Option(
+        False, "--skip-analysis",
+        help="Skip ticker analysis; use latest existing reports from output dir",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1760,43 +1768,66 @@ def paper(
         f"[bold]Analysis Plan[/bold]\n"
         f"Tickers: {', '.join(all_tickers)}\n"
         f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}\n"
-        f"Models: {quick_model} (quick) / {deep_model} (deep)",
+        f"Models: {quick_model} (quick) / {deep_model} (deep)"
+        + ("\n[yellow]Skip-analysis: using existing reports[/yellow]" if skip_analysis else "")
+        + ("\n[yellow]Dry-run: orders will NOT be submitted[/yellow]" if dry_run else ""),
         border_style="cyan",
     ))
-
-    graph = TradingAgentsGraph(
-        all_analyst_keys,
-        config=config,
-        debug=True,
-    )
 
     results = []
     completed_states = []
 
-    for i, ticker in enumerate(all_tickers, 1):
-        console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
-        console.print(f"[bold cyan]Ticker {i}/{len(all_tickers)}: {ticker}[/bold cyan]")
-        console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
+    if skip_analysis:
+        from tradingagents.agents.utils.rating import parse_rating
 
-        ticker_output = output_dir / f"{ticker}_{analysis_date}"
+        missing = []
+        for ticker in all_tickers:
+            report_dir = _find_latest_report_dir(output_dir, ticker)
+            if report_dir is None:
+                missing.append(ticker)
+                continue
+            final_state = _load_report_from_disk(report_dir)
+            if not final_state.get("final_trade_decision"):
+                missing.append(ticker)
+                console.print(f"[yellow]{ticker}: report in {report_dir.name} has no portfolio decision — skipping[/yellow]")
+                continue
+            decision = parse_rating(final_state["final_trade_decision"])
+            completed_states.append((ticker, decision, final_state))
+            console.print(f"[green]Loaded {ticker} from {report_dir.name} — {decision}[/green]")
 
-        try:
-            result = _run_single_ticker(
-                ticker=ticker,
-                analysis_date=analysis_date,
-                selected_analyst_keys=all_analyst_keys,
-                config=config,
-                graph=graph,
-                output_dir=ticker_output,
-            )
-            results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
-            completed_states.append((ticker, result["decision"], result["final_state"]))
-            console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
-        except Exception as e:
-            results.append((ticker, "FAILED", str(e), 0))
-            console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+        if missing:
+            console.print(f"[yellow]No reports found for: {', '.join(missing)}[/yellow]")
+    else:
+        graph = TradingAgentsGraph(
+            all_analyst_keys,
+            config=config,
+            debug=True,
+        )
 
-    _print_batch_summary(results, output_dir)
+        for i, ticker in enumerate(all_tickers, 1):
+            console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
+            console.print(f"[bold cyan]Ticker {i}/{len(all_tickers)}: {ticker}[/bold cyan]")
+            console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
+
+            ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+            try:
+                result = _run_single_ticker(
+                    ticker=ticker,
+                    analysis_date=analysis_date,
+                    selected_analyst_keys=all_analyst_keys,
+                    config=config,
+                    graph=graph,
+                    output_dir=ticker_output,
+                )
+                results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+                completed_states.append((ticker, result["decision"], result["final_state"]))
+                console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
+            except Exception as e:
+                results.append((ticker, "FAILED", str(e), 0))
+                console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+
+        _print_batch_summary(results, output_dir)
 
     if len(completed_states) < 2:
         console.print("[yellow]Need at least 2 successful analyses for a merge report. Skipping trade execution.[/yellow]")
@@ -1836,6 +1867,10 @@ def paper(
         order_table.add_row(order.symbol, side_str, str(int(order.qty)))
     console.print(order_table)
     console.print(f"\n[dim]Reasoning: {trade_plan.reasoning}[/dim]")
+
+    if dry_run:
+        console.print("\n[yellow]Dry-run mode — no orders submitted.[/yellow]")
+        return
 
     console.print(f"\n[bold cyan]Submitting {len(trade_plan.orders)} order(s) to Alpaca ({mode})...[/bold cyan]")
     order_dicts = [{"symbol": o.symbol, "side": o.side, "qty": int(o.qty)} for o in trade_plan.orders]
