@@ -175,7 +175,9 @@ def _stage2_orders(
         if price is not None:
             total_value += qty * price
 
-    orders = []
+    sell_orders = []
+    buy_targets = []
+
     for alloc in allocation.allocations:
         if alloc.action == "hold":
             continue
@@ -193,34 +195,38 @@ def _stage2_orders(
             sell_qty = int(current_qty) - target_qty
             if sell_qty > 0:
                 sell_qty = min(sell_qty, int(current_qty))
-                orders.append(TradeOrder(symbol=sym, side="sell", qty=sell_qty))
+                sell_orders.append(TradeOrder(symbol=sym, side="sell", qty=sell_qty))
         elif alloc.action == "buy":
             buy_qty = target_qty - int(current_qty)
             if buy_qty > 0:
-                orders.append(TradeOrder(symbol=sym, side="buy", qty=buy_qty))
+                buy_targets.append({"symbol": sym, "qty": buy_qty, "price": price})
 
-    # Verify total buy cost doesn't exceed effective buying power
-    sell_proceeds = sum(
-        o.qty * quotes.get(o.symbol, 0) for o in orders if o.side == "sell"
-    )
+    sell_proceeds = sum(o.qty * quotes.get(o.symbol, 0) for o in sell_orders)
     effective_cash = cash + sell_proceeds
-    total_buy_cost = sum(
-        o.qty * quotes.get(o.symbol, 0) for o in orders if o.side == "buy"
-    )
 
-    if total_buy_cost > effective_cash:
-        scale = effective_cash / total_buy_cost if total_buy_cost > 0 else 0
-        scaled_orders = []
-        for o in orders:
-            if o.side == "buy":
-                new_qty = int(o.qty * scale)
-                if new_qty > 0:
-                    scaled_orders.append(TradeOrder(symbol=o.symbol, side="buy", qty=new_qty))
-            else:
-                scaled_orders.append(o)
-        orders = scaled_orders
+    total_buy_cost = sum(b["qty"] * b["price"] for b in buy_targets)
 
-    return TradePlan(orders=orders, reasoning=allocation.reasoning)
+    if total_buy_cost < effective_cash and buy_targets:
+        leftover = effective_cash - total_buy_cost
+        buy_values = [b["qty"] * b["price"] for b in buy_targets]
+        for i, b in enumerate(buy_targets):
+            share = buy_values[i] / total_buy_cost if total_buy_cost > 0 else 1.0 / len(buy_targets)
+            extra_dollars = leftover * share
+            extra_shares = int(extra_dollars / b["price"])
+            b["qty"] += extra_shares
+
+    total_buy_cost = sum(b["qty"] * b["price"] for b in buy_targets)
+    if total_buy_cost > effective_cash and buy_targets:
+        scale = effective_cash / total_buy_cost
+        for b in buy_targets:
+            b["qty"] = int(b["qty"] * scale)
+
+    buy_orders = [
+        TradeOrder(symbol=b["symbol"], side="buy", qty=b["qty"])
+        for b in buy_targets if b["qty"] > 0
+    ]
+
+    return TradePlan(orders=sell_orders + buy_orders, reasoning=allocation.reasoning)
 
 
 def parse_orders(
