@@ -936,6 +936,26 @@ def format_tool_args(args, max_length=80) -> str:
 
 DEPTH_MAP = {"shallow": 1, "medium": 3, "deep": 5}
 
+STRATEGY_PROFILES = {
+    "conservative": (
+        "Conservative: Prioritize capital preservation. Favor large-cap, low-volatility, "
+        "and dividend-paying positions. Limit speculative or high-beta tickers to ≤5% of "
+        "portfolio. Prefer Hold over Buy when conviction is moderate."
+    ),
+    "balanced": (
+        "Balanced: Mix of stability and growth. Allocate to high-conviction Buy-rated tickers "
+        "regardless of volatility, but size positions proportional to risk — larger positions "
+        "in blue-chips, smaller positions in speculative names. Target 10-20% in higher-risk "
+        "tickers if the analysis supports them."
+    ),
+    "aggressive": (
+        "Aggressive: Maximize growth potential. Overweight high-conviction, high-risk/high-reward "
+        "tickers. Willing to accept significant drawdowns for outsized upside. Speculative and "
+        "small-cap positions can be 30%+ of portfolio. Only avoid a ticker if the analysis "
+        "explicitly rates it Sell."
+    ),
+}
+
 PROVIDER_BACKEND_URLS = {
     "openai": "https://api.openai.com/v1",
     "google": None,
@@ -1272,7 +1292,7 @@ def _build_ticker_section(ticker, decision, final_state, include_analyst_reports
     return "\n\n".join(parts)
 
 
-def _generate_merge_report(ticker_results, config, portfolio=None):
+def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None):
     from tradingagents.llm_clients import create_llm_client
 
     llm_kwargs = {}
@@ -1327,6 +1347,10 @@ def _generate_merge_report(ticker_results, config, portfolio=None):
     lang = config.get("output_language", "English")
     language_instruction = "" if lang.strip().lower() == "english" else f" Write your entire response in {lang}."
 
+    strategy_instruction = ""
+    if strategy:
+        strategy_instruction = f"**Investment Strategy:** {strategy}\nApply this risk profile when ranking tickers and recommending capital allocation.\n"
+
     report_type = "full analysis reports" if include_analyst_reports else "Portfolio Manager decisions"
 
     prompt = f"""You are a Chief Investment Officer. You have received {report_type} for {len(ticker_results)} tickers. Each ticker was analyzed by a team of market, sentiment, news, and fundamentals analysts, followed by research debate, trading, and risk management — culminating in a Portfolio Manager decision.
@@ -1345,7 +1369,7 @@ def _generate_merge_report(ticker_results, config, portfolio=None):
 ---
 
 {portfolio_context}
-
+{strategy_instruction}
 Produce a report with these sections:
 
 ### 1. Cross-Ticker Dependencies and Contradictions
@@ -1501,6 +1525,10 @@ def batch(
         None, "--portfolio-format",
         help="Portfolio file format: etrade, generic (auto-detected if omitted)",
     ),
+    strategy: str = typer.Option(
+        "balanced", "--strategy", "-s",
+        help="Investment risk strategy: conservative, balanced, aggressive",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     from cli.portfolio import load_portfolio
@@ -1544,6 +1572,8 @@ def batch(
     }
     config = _build_config(selections)
 
+    strategy_text = STRATEGY_PROFILES.get(strategy.lower(), STRATEGY_PROFILES["balanced"])
+
     portfolio_dict = portfolio.to_dict() if portfolio else None
 
     if merge_only:
@@ -1581,7 +1611,7 @@ def batch(
             raise typer.Exit(1)
 
         console.print(f"\n[bold cyan]Generating cross-ticker comparison report for {len(completed_states)} tickers...[/bold cyan]")
-        report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
+        report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
         report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
         console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
         console.print()
@@ -1638,7 +1668,7 @@ def batch(
     if not no_merge and len(completed_states) >= 2:
         console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
         try:
-            report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
+            report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
             report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
             console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
             console.print()
@@ -1697,6 +1727,10 @@ def paper(
     skip_analysis: bool = typer.Option(
         False, "--skip-analysis",
         help="Skip ticker analysis; use latest existing reports from output dir",
+    ),
+    strategy: str = typer.Option(
+        "balanced", "--strategy", "-s",
+        help="Investment risk strategy: conservative, balanced, aggressive",
     ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
@@ -1767,6 +1801,8 @@ def paper(
         "output_language": language,
     }
     config = _build_config(selections)
+
+    strategy_text = STRATEGY_PROFILES.get(strategy.lower(), STRATEGY_PROFILES["balanced"])
 
     console.print(Panel(
         f"[bold]Analysis Plan[/bold]\n"
@@ -1840,7 +1876,7 @@ def paper(
     portfolio_dict = portfolio.to_dict()
 
     console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
-    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
+    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
     report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
     console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
     console.print()
@@ -1848,7 +1884,7 @@ def paper(
 
     console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
     try:
-        trade_plan = parse_orders(merge_report, portfolio_dict, quotes, pending, config)
+        trade_plan = parse_orders(merge_report, portfolio_dict, quotes, pending, config, strategy=strategy_text)
     except Exception as e:
         console.print(f"[red]Trade plan generation failed: {e}[/red]")
         return

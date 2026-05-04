@@ -71,6 +71,21 @@ tradingagents batch --portfolio ~/Downloads/PortfolioDownload.csv --merge-only
 tradingagents batch AAPL NVDA --no-merge
 ```
 
+### Investment Strategy
+
+Control risk appetite for the merge report and capital allocation.
+
+```bash
+# Conservative — favor blue-chips, limit speculative positions to ≤5%
+tradingagents batch AAPL NVDA NUVL -s conservative
+
+# Balanced (default) — mix stability and growth, 10-20% in higher-risk names
+tradingagents batch AAPL NVDA NUVL
+
+# Aggressive — overweight high-risk/high-reward, speculative names can be 30%+
+tradingagents batch AAPL NVDA NUVL -s aggressive
+```
+
 ### All Options
 
 | Option | Short | Default | Description |
@@ -89,6 +104,7 @@ tradingagents batch AAPL NVDA --no-merge
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
 | `--portfolio-format` | | *(auto)* | Force format: `etrade` or `generic` |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
 
 ---
 
@@ -155,6 +171,18 @@ tradingagents paper --live NVDA
 
 A bold red warning is displayed before proceeding.
 
+### Investment Strategy
+
+Same strategy flag as `batch` — controls risk appetite for the merge report and order sizing.
+
+```bash
+# Aggressive — will size into high-risk tickers more heavily
+tradingagents paper --dry-run --skip-analysis -s aggressive NUVL CYTK
+
+# Conservative — favor stable positions, limit speculative exposure
+tradingagents paper --dry-run --skip-analysis -s conservative
+```
+
 ### All Options
 
 | Option | Short | Default | Description |
@@ -171,6 +199,7 @@ A bold red warning is displayed before proceeding.
 | `--language` | `-l` | `English` | Output language |
 | `--dry-run` | | `false` | Show trades but do not submit orders |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
 
 ---
 

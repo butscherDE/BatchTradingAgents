@@ -41,6 +41,7 @@ def parse_orders(
     quotes: dict[str, float],
     pending: list[dict],
     config: dict,
+    strategy: Optional[str] = None,
 ) -> TradePlan:
     from tradingagents.llm_clients import create_llm_client
 
@@ -73,6 +74,10 @@ def parse_orders(
 
     pending_str = format_pending_orders(pending)
 
+    strategy_block = ""
+    if strategy:
+        strategy_block = f"**Investment Strategy:** {strategy}\nApply this risk profile when sizing orders.\n"
+
     prompt = f"""You are a portfolio execution engine. Given the cross-ticker analysis report and the current portfolio state below, produce a concrete list of market orders to execute.
 
 **Current Holdings:**
@@ -90,7 +95,7 @@ def parse_orders(
 {merge_report}
 
 ---
-
+{strategy_block}
 **Rules:**
 - Only output orders that the analysis report supports. If the report says Hold, do not trade that ticker.
 - Sell quantity must not exceed the current holding quantity for that symbol.
