@@ -3,23 +3,40 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
+class TickerAllocation(BaseModel):
+    symbol: str = Field(description="Ticker symbol")
+    action: Literal["buy", "sell", "hold"] = Field(description="Direction")
+    pct: float = Field(
+        description=(
+            "Target allocation as a percentage of total portfolio value (0-100). "
+            "For sell: set to 0 to exit entirely, or a reduced target %. "
+            "For hold: set to the current allocation % (no change). "
+            "For buy: set to the desired target %."
+        ),
+    )
+
+
+class AllocationPlan(BaseModel):
+    allocations: list[TickerAllocation] = Field(
+        description="Target allocation for every ticker mentioned in the report.",
+    )
+    cash_pct: float = Field(
+        description="Target cash allocation as percentage of total portfolio (0-100).",
+    )
+    reasoning: str = Field(
+        description="Brief explanation of the allocation rationale.",
+    )
+
+
 class TradeOrder(BaseModel):
-    symbol: str = Field(description="Ticker symbol to trade")
-    side: Literal["buy", "sell"] = Field(description="Order direction")
-    qty: float = Field(description="Number of shares to trade")
+    symbol: str
+    side: Literal["buy", "sell"]
+    qty: int
 
 
 class TradePlan(BaseModel):
-    orders: list[TradeOrder] = Field(
-        description=(
-            "Concrete orders to execute. Every order must have a symbol, side, "
-            "and whole-share quantity. Sell qty must not exceed current holdings. "
-            "Total buy notional must not exceed available cash."
-        ),
-    )
-    reasoning: str = Field(
-        description="Brief explanation of why these specific orders were chosen.",
-    )
+    orders: list[TradeOrder]
+    reasoning: str
 
 
 def format_pending_orders(pending: list[dict]) -> str:
@@ -35,14 +52,7 @@ def format_pending_orders(pending: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def parse_orders(
-    merge_report: str,
-    portfolio_dict: dict,
-    quotes: dict[str, float],
-    pending: list[dict],
-    config: dict,
-    strategy: Optional[str] = None,
-) -> TradePlan:
+def _get_llm(config):
     from tradingagents.llm_clients import create_llm_client
 
     llm_kwargs = {}
@@ -60,62 +70,168 @@ def parse_orders(
         base_url=config.get("backend_url"),
         **llm_kwargs,
     )
-    llm = client.get_llm()
+    return client.get_llm()
 
-    holdings_lines = []
-    total_holdings_value = 0.0
+
+def _build_holdings_context(portfolio_dict, quotes):
+    lines = []
+    total_value = 0.0
     for sym, qty in portfolio_dict["holdings"].items():
         price = quotes.get(sym)
         if price is not None:
             val = qty * price
-            total_holdings_value += val
-            holdings_lines.append(f"  - {sym}: {qty} shares @ ${price:,.2f} = ${val:,.2f}")
+            total_value += val
+            lines.append(f"  - {sym}: {qty} shares @ ${price:,.2f} = ${val:,.2f}")
         else:
-            holdings_lines.append(f"  - {sym}: {qty} shares (price unavailable)")
-    holdings_str = "\n".join(holdings_lines) if holdings_lines else "  (no current holdings)"
-
+            lines.append(f"  - {sym}: {qty} shares (price unavailable)")
     cash = portfolio_dict["cash"]
-    total_portfolio_value = total_holdings_value + cash
+    total_value += cash
+    return "\n".join(lines) if lines else "  (no current holdings)", cash, total_value
+
+
+def _stage1_allocations(
+    llm,
+    merge_report: str,
+    portfolio_dict: dict,
+    quotes: dict[str, float],
+    pending: list[dict],
+    strategy: Optional[str] = None,
+) -> AllocationPlan:
+    holdings_str, cash, total_value = _build_holdings_context(portfolio_dict, quotes)
 
     quotes_lines = []
     for sym, price in quotes.items():
-        quotes_lines.append(f"  - {sym}: ${price:,.2f}")
-    quotes_str = "\n".join(quotes_lines) if quotes_lines else "  (no additional quotes)"
+        if sym not in portfolio_dict["holdings"]:
+            quotes_lines.append(f"  - {sym}: ${price:,.2f}")
+    quotes_str = "\n".join(quotes_lines) if quotes_lines else "  (none)"
 
     pending_str = format_pending_orders(pending)
 
     strategy_block = ""
     if strategy:
-        strategy_block = f"**Investment Strategy:** {strategy}\nApply this risk profile when sizing orders.\n"
+        strategy_block = f"\n**Investment Strategy:** {strategy}\nApply this risk profile when deciding allocations.\n"
 
-    prompt = f"""You are a portfolio execution engine. Given the cross-ticker analysis report and the current portfolio state below, produce a concrete list of market orders to execute.
+    # Compute current allocation percentages for context
+    alloc_lines = []
+    for sym, qty in portfolio_dict["holdings"].items():
+        price = quotes.get(sym)
+        if price is not None and total_value > 0:
+            pct = (qty * price / total_value) * 100
+            alloc_lines.append(f"  - {sym}: {pct:.1f}%")
+    if total_value > 0:
+        alloc_lines.append(f"  - CASH: {(cash / total_value) * 100:.1f}%")
+    current_alloc_str = "\n".join(alloc_lines) if alloc_lines else "  (empty)"
+
+    prompt = f"""You are a portfolio allocation engine. Given the analysis report and current portfolio, decide target allocation percentages for each ticker.
 
 **Current Holdings:**
 {holdings_str}
 
 **Cash:** ${cash:,.2f}
-**Total Portfolio Value:** ${total_portfolio_value:,.2f}
+**Total Portfolio Value:** ${total_value:,.2f}
+
+**Current Allocation:**
+{current_alloc_str}
 
 {pending_str}
 
-**Latest Quotes for Tickers Not in Portfolio:**
+**Quotes for Tickers Not in Portfolio:**
 {quotes_str}
-
+{strategy_block}
 **Cross-Ticker Analysis Report:**
 
 {merge_report}
 
 ---
-{strategy_block}
-**Rules:**
-- Only output orders that the analysis report supports. If the report says Hold, do not trade that ticker.
-- Sell quantity must not exceed the current holding quantity for that symbol.
-- IMPORTANT: Proceeds from sells are immediately available for buys. If you sell $200,000 of AAPL and have $27,000 cash, you have $227,000 to deploy on buys. You MUST compute buy quantities against this effective buying power, not just the starting cash.
-- Target deploying ≥90% of effective buying power (cash + sell proceeds) into Buy/Overweight-rated tickers. Allocate proportionally to conviction ranking. Leaving more than 10% in cash requires explicit justification.
-- Do not duplicate or conflict with any pending orders listed above.
-- Use whole share quantities only.
-- If no action is warranted, return an empty orders list.
-- Be decisive: if the report recommends buying or selling, produce the order."""
 
-    structured_llm = llm.with_structured_output(TradePlan)
+**Instructions:**
+- For each ticker in the report, output a target allocation percentage of total portfolio value and an action (buy, sell, hold).
+- Sell means reduce or exit: set pct to 0 for full exit, or a lower % to trim.
+- Buy means add or enter: set pct to desired target.
+- Hold means keep current allocation: set pct to the current %.
+- All allocation percentages plus cash_pct MUST sum to 100.
+- Do not leave excessive cash. Only allocate to cash what the strategy or report explicitly justifies.
+- Account for pending orders — do not allocate to tickers with conflicting open orders.
+- Be decisive and follow the report's ratings."""
+
+    structured_llm = llm.with_structured_output(AllocationPlan)
     return structured_llm.invoke(prompt)
+
+
+def _stage2_orders(
+    allocation: AllocationPlan,
+    portfolio_dict: dict,
+    quotes: dict[str, float],
+) -> TradePlan:
+    holdings = portfolio_dict["holdings"]
+    cash = portfolio_dict["cash"]
+
+    total_value = cash
+    for sym, qty in holdings.items():
+        price = quotes.get(sym)
+        if price is not None:
+            total_value += qty * price
+
+    orders = []
+    for alloc in allocation.allocations:
+        if alloc.action == "hold":
+            continue
+
+        sym = alloc.symbol
+        price = quotes.get(sym)
+        if price is None or price <= 0:
+            continue
+
+        current_qty = holdings.get(sym, 0)
+        target_value = total_value * (alloc.pct / 100.0)
+        target_qty = int(target_value / price)
+
+        if alloc.action == "sell":
+            sell_qty = int(current_qty) - target_qty
+            if sell_qty > 0:
+                sell_qty = min(sell_qty, int(current_qty))
+                orders.append(TradeOrder(symbol=sym, side="sell", qty=sell_qty))
+        elif alloc.action == "buy":
+            buy_qty = target_qty - int(current_qty)
+            if buy_qty > 0:
+                orders.append(TradeOrder(symbol=sym, side="buy", qty=buy_qty))
+
+    # Verify total buy cost doesn't exceed effective buying power
+    sell_proceeds = sum(
+        o.qty * quotes.get(o.symbol, 0) for o in orders if o.side == "sell"
+    )
+    effective_cash = cash + sell_proceeds
+    total_buy_cost = sum(
+        o.qty * quotes.get(o.symbol, 0) for o in orders if o.side == "buy"
+    )
+
+    if total_buy_cost > effective_cash:
+        scale = effective_cash / total_buy_cost if total_buy_cost > 0 else 0
+        scaled_orders = []
+        for o in orders:
+            if o.side == "buy":
+                new_qty = int(o.qty * scale)
+                if new_qty > 0:
+                    scaled_orders.append(TradeOrder(symbol=o.symbol, side="buy", qty=new_qty))
+            else:
+                scaled_orders.append(o)
+        orders = scaled_orders
+
+    return TradePlan(orders=orders, reasoning=allocation.reasoning)
+
+
+def parse_orders(
+    merge_report: str,
+    portfolio_dict: dict,
+    quotes: dict[str, float],
+    pending: list[dict],
+    config: dict,
+    strategy: Optional[str] = None,
+) -> TradePlan:
+    llm = _get_llm(config)
+
+    allocation = _stage1_allocations(
+        llm, merge_report, portfolio_dict, quotes, pending, strategy,
+    )
+
+    return _stage2_orders(allocation, portfolio_dict, quotes)
