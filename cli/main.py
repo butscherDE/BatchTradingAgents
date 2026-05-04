@@ -1720,7 +1720,7 @@ def paper(
     client = create_client(api_key, api_secret, paper=not live)
 
     console.print("[cyan]Fetching portfolio and pending orders...[/cyan]")
-    portfolio, pending = fetch_portfolio(client)
+    portfolio, pending, position_prices = fetch_portfolio(client)
 
     console.print(Panel(
         f"[bold]Alpaca Portfolio ({mode})[/bold]\n"
@@ -1871,6 +1871,66 @@ def paper(
         order_table.add_row(order.symbol, side_str, str(int(order.qty)))
     console.print(order_table)
     console.print(f"\n[dim]Reasoning: {trade_plan.reasoning}[/dim]")
+
+    # Build projected portfolio after pending + new orders
+    all_prices = {**position_prices, **quotes}
+    projected_holdings = dict(portfolio.holdings)
+    projected_cash = portfolio.cash
+
+    for o in pending:
+        sym = o["symbol"]
+        qty = o.get("qty") or 0
+        filled = o.get("filled_qty", 0)
+        remaining = qty - filled
+        if remaining <= 0:
+            continue
+        price = all_prices.get(sym, 0)
+        if o["side"] == "buy":
+            projected_holdings[sym] = projected_holdings.get(sym, 0) + remaining
+            projected_cash -= remaining * price
+        elif o["side"] == "sell":
+            projected_holdings[sym] = projected_holdings.get(sym, 0) - remaining
+            projected_cash += remaining * price
+
+    for order in trade_plan.orders:
+        sym = order.symbol
+        qty = int(order.qty)
+        price = all_prices.get(sym, 0)
+        if order.side == "buy":
+            projected_holdings[sym] = projected_holdings.get(sym, 0) + qty
+            projected_cash -= qty * price
+        elif order.side == "sell":
+            projected_holdings[sym] = projected_holdings.get(sym, 0) - qty
+            projected_cash += qty * price
+
+    projected_holdings = {s: q for s, q in projected_holdings.items() if q > 0}
+
+    proj_table = Table(
+        title="Projected Portfolio (after pending + new orders)",
+        show_header=True,
+        header_style="bold magenta",
+        box=box.ROUNDED,
+    )
+    proj_table.add_column("Symbol", style="cyan", justify="center")
+    proj_table.add_column("Qty", justify="right")
+    proj_table.add_column("Price", justify="right")
+    proj_table.add_column("Value", justify="right")
+
+    total_value = 0.0
+    for sym in sorted(projected_holdings):
+        qty = projected_holdings[sym]
+        price = all_prices.get(sym)
+        if price is not None:
+            val = qty * price
+            total_value += val
+            proj_table.add_row(sym, f"{qty:,.2f}", f"${price:,.2f}", f"${val:,.2f}")
+        else:
+            proj_table.add_row(sym, f"{qty:,.2f}", "—", "—")
+
+    proj_table.add_row("", "", "", "─" * 12, style="dim")
+    proj_table.add_row("CASH", "", "", f"${projected_cash:,.2f}", style="bold")
+    proj_table.add_row("TOTAL", "", "", f"${total_value + projected_cash:,.2f}", style="bold green")
+    console.print(proj_table)
 
     if dry_run:
         console.print("\n[yellow]Dry-run mode — no orders submitted.[/yellow]")

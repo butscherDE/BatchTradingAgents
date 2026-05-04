@@ -11,13 +11,17 @@ def create_client(key: str, secret: str, paper: bool = True):
     return TradingClient(key, secret, paper=paper)
 
 
-def fetch_portfolio(client) -> tuple[Portfolio, list[dict]]:
+def fetch_portfolio(client) -> tuple[Portfolio, list[dict], dict[str, float]]:
+    """Returns (portfolio, pending_orders, prices_by_symbol)."""
     account = client.get_account()
     positions = client.get_all_positions()
 
     holdings: dict[str, float] = {}
+    prices: dict[str, float] = {}
     for pos in positions:
         holdings[pos.symbol] = float(pos.qty)
+        if pos.current_price is not None:
+            prices[pos.symbol] = float(pos.current_price)
 
     cash = float(account.cash)
 
@@ -42,7 +46,7 @@ def fetch_portfolio(client) -> tuple[Portfolio, list[dict]]:
         pending.append(entry)
 
     portfolio = Portfolio(holdings=holdings, cash=cash)
-    return portfolio, pending
+    return portfolio, pending, prices
 
 
 def fetch_quotes(client, tickers: list[str]) -> dict[str, float]:
