@@ -1521,6 +1521,10 @@ def batch(
             raise typer.Exit(1)
     else:
         tickers = [normalize_ticker_symbol(t) for t in tickers]
+        if portfolio and portfolio.holdings:
+            for sym in portfolio.ticker_symbols():
+                if sym not in tickers:
+                    tickers.append(sym)
 
     analysis_date = date or datetime.datetime.now().strftime("%Y-%m-%d")
     depth_value = DEPTH_MAP.get(depth.lower(), 3)
@@ -1643,6 +1647,247 @@ def batch(
             console.print(f"\n[red]Merge report generation failed: {e}[/red]")
     elif not no_merge and len(completed_states) < 2:
         console.print("[yellow]Skipping merge report: need at least 2 successful analyses.[/yellow]")
+
+
+@app.command()
+def paper(
+    tickers: Optional[list[str]] = typer.Argument(
+        None, help="Extra ticker symbols to consider buying (portfolio tickers are always included)",
+    ),
+    key: Optional[str] = typer.Option(
+        None, "--key",
+        help="Alpaca API key (or set ALPACA_API_KEY env var)",
+    ),
+    secret: Optional[str] = typer.Option(
+        None, "--secret",
+        help="Alpaca API secret (or set ALPACA_API_SECRET env var)",
+    ),
+    live: bool = typer.Option(
+        False, "--live",
+        help="Use live trading instead of paper trading. Real money!",
+    ),
+    output_dir: Path = typer.Option(
+        Path("./reports"), "--output-dir", "-o",
+        help="Directory to save all reports",
+    ),
+    depth: str = typer.Option(
+        "medium", "--depth",
+        help="Research depth: shallow, medium, or deep",
+    ),
+    provider: str = typer.Option(
+        "ollama", "--provider", "-p",
+        help="LLM provider (e.g., ollama, openai, anthropic)",
+    ),
+    quick_model: str = typer.Option(
+        "qwen3:8b", "--quick-model",
+        help="Model for quick/shallow thinking",
+    ),
+    deep_model: str = typer.Option(
+        "qwen3:32b", "--deep-model",
+        help="Model for deep thinking",
+    ),
+    language: str = typer.Option(
+        "English", "--language", "-l",
+        help="Output language for reports",
+    ),
+):
+    """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
+    from cli.alpaca_client import (
+        create_client, fetch_portfolio, fetch_quotes,
+        submit_orders, resolve_credentials,
+    )
+    from cli.order_parser import parse_orders, format_pending_orders
+
+    api_key, api_secret = resolve_credentials(key, secret)
+
+    if live:
+        console.print(Panel(
+            "[bold red]LIVE TRADING MODE[/bold red]\n"
+            "[red]Real money will be used. Orders will be submitted to your live Alpaca account.[/red]",
+            border_style="red",
+        ))
+
+    mode = "LIVE" if live else "PAPER"
+    console.print(f"[cyan]Connecting to Alpaca ({mode})...[/cyan]")
+    client = create_client(api_key, api_secret, paper=not live)
+
+    console.print("[cyan]Fetching portfolio and pending orders...[/cyan]")
+    portfolio, pending = fetch_portfolio(client)
+
+    console.print(Panel(
+        f"[bold]Alpaca Portfolio ({mode})[/bold]\n"
+        f"Holdings: {len(portfolio.holdings)} positions\n"
+        f"Cash: ${portfolio.cash:,.2f}\n"
+        + (format_pending_orders(pending) if pending else "Pending Orders: None"),
+        border_style="green" if not live else "red",
+    ))
+
+    extra_tickers = [normalize_ticker_symbol(t) for t in tickers] if tickers else []
+    all_tickers = list(portfolio.ticker_symbols())
+    for t in extra_tickers:
+        if t not in all_tickers:
+            all_tickers.append(t)
+
+    if not all_tickers:
+        console.print("[red]No tickers to analyze (empty portfolio and no extra tickers). Aborting.[/red]")
+        raise typer.Exit(1)
+
+    new_tickers = [t for t in all_tickers if t not in portfolio.holdings]
+    quotes = {}
+    if new_tickers:
+        console.print(f"[cyan]Fetching quotes for: {', '.join(new_tickers)}...[/cyan]")
+        quotes = fetch_quotes(client, new_tickers)
+
+    analysis_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    depth_value = DEPTH_MAP.get(depth.lower(), 3)
+    backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
+    all_analyst_keys = ["market", "social", "news", "fundamentals"]
+
+    selections = {
+        "research_depth": depth_value,
+        "llm_provider": provider.lower(),
+        "backend_url": backend_url,
+        "shallow_thinker": quick_model,
+        "deep_thinker": deep_model,
+        "google_thinking_level": None,
+        "openai_reasoning_effort": None,
+        "anthropic_effort": None,
+        "output_language": language,
+    }
+    config = _build_config(selections)
+
+    console.print(Panel(
+        f"[bold]Analysis Plan[/bold]\n"
+        f"Tickers: {', '.join(all_tickers)}\n"
+        f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}\n"
+        f"Models: {quick_model} (quick) / {deep_model} (deep)",
+        border_style="cyan",
+    ))
+
+    graph = TradingAgentsGraph(
+        all_analyst_keys,
+        config=config,
+        debug=True,
+    )
+
+    results = []
+    completed_states = []
+
+    for i, ticker in enumerate(all_tickers, 1):
+        console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
+        console.print(f"[bold cyan]Ticker {i}/{len(all_tickers)}: {ticker}[/bold cyan]")
+        console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
+
+        ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+        try:
+            result = _run_single_ticker(
+                ticker=ticker,
+                analysis_date=analysis_date,
+                selected_analyst_keys=all_analyst_keys,
+                config=config,
+                graph=graph,
+                output_dir=ticker_output,
+            )
+            results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+            completed_states.append((ticker, result["decision"], result["final_state"]))
+            console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
+        except Exception as e:
+            results.append((ticker, "FAILED", str(e), 0))
+            console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+
+    _print_batch_summary(results, output_dir)
+
+    if len(completed_states) < 2:
+        console.print("[yellow]Need at least 2 successful analyses for a merge report. Skipping trade execution.[/yellow]")
+        return
+
+    portfolio_dict = portfolio.to_dict()
+
+    console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
+    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict)
+    report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
+    console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
+    console.print()
+    console.print(Panel(Markdown(merge_report), title="Cross-Ticker Comparison", border_style="green"))
+
+    console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
+    try:
+        trade_plan = parse_orders(merge_report, portfolio_dict, quotes, pending, config)
+    except Exception as e:
+        console.print(f"[red]Trade plan generation failed: {e}[/red]")
+        return
+
+    if not trade_plan.orders:
+        console.print("[yellow]No trades recommended. Portfolio unchanged.[/yellow]")
+        return
+
+    order_table = Table(
+        title="Trade Plan",
+        show_header=True,
+        header_style="bold magenta",
+        box=box.ROUNDED,
+    )
+    order_table.add_column("Symbol", style="cyan", justify="center")
+    order_table.add_column("Side", justify="center")
+    order_table.add_column("Qty", justify="right")
+    for order in trade_plan.orders:
+        side_str = "[green]BUY[/green]" if order.side == "buy" else "[red]SELL[/red]"
+        order_table.add_row(order.symbol, side_str, str(int(order.qty)))
+    console.print(order_table)
+    console.print(f"\n[dim]Reasoning: {trade_plan.reasoning}[/dim]")
+
+    console.print(f"\n[bold cyan]Submitting {len(trade_plan.orders)} order(s) to Alpaca ({mode})...[/bold cyan]")
+    order_dicts = [{"symbol": o.symbol, "side": o.side, "qty": int(o.qty)} for o in trade_plan.orders]
+    exec_results = submit_orders(client, order_dicts)
+
+    exec_table = Table(
+        title="Execution Results",
+        show_header=True,
+        header_style="bold magenta",
+        box=box.ROUNDED,
+    )
+    exec_table.add_column("Symbol", style="cyan", justify="center")
+    exec_table.add_column("Side", justify="center")
+    exec_table.add_column("Qty", justify="right")
+    exec_table.add_column("Status", justify="center")
+    exec_table.add_column("Order ID", style="dim")
+
+    for r in exec_results:
+        side_str = "[green]BUY[/green]" if r["side"] == "buy" else "[red]SELL[/red]"
+        if r["error"]:
+            status_str = f"[red]{r['error'][:40]}[/red]"
+        else:
+            status_str = f"[green]{r['status']}[/green]"
+        exec_table.add_row(
+            r["symbol"], side_str, str(r["qty"]),
+            status_str, r.get("order_id", "-") or "-",
+        )
+    console.print(exec_table)
+
+    trades_dir = output_dir / "_trades"
+    trades_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    trade_log = trades_dir / f"trade_log_{timestamp}.md"
+
+    log_lines = [
+        f"# Trade Execution Log",
+        f"**Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+        f"**Mode:** {mode}",
+        f"",
+        f"## Trade Plan",
+        f"**Reasoning:** {trade_plan.reasoning}",
+        f"",
+    ]
+    for o in trade_plan.orders:
+        log_lines.append(f"- {o.side.upper()} {int(o.qty)} {o.symbol}")
+    log_lines.append("")
+    log_lines.append("## Execution Results")
+    for r in exec_results:
+        status = r["error"] or r["status"]
+        log_lines.append(f"- {r['side'].upper()} {r['qty']} {r['symbol']}: {status} (order_id: {r.get('order_id', '-')})")
+    trade_log.write_text("\n".join(log_lines), encoding="utf-8")
+    console.print(f"\n[green]Trade log saved to:[/green] {trade_log.resolve()}")
 
 
 if __name__ == "__main__":
