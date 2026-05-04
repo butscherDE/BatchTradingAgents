@@ -1292,7 +1292,7 @@ def _build_ticker_section(ticker, decision, final_state, include_analyst_reports
     return "\n\n".join(parts)
 
 
-def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None):
+def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None, tax_summaries=None):
     from tradingagents.llm_clients import create_llm_client
 
     llm_kwargs = {}
@@ -1321,11 +1321,14 @@ def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None
     ticker_decisions = "\n\n---\n\n".join(ticker_sections)
 
     if portfolio:
-        holdings_lines = "\n".join(
-            f"  - {sym}: {qty} shares" for sym, qty in portfolio["holdings"].items()
-        )
+        holdings_lines = []
+        for sym, qty in portfolio["holdings"].items():
+            line = f"  - {sym}: {qty} shares"
+            if tax_summaries and sym in tax_summaries:
+                line += f" ({tax_summaries[sym]})"
+            holdings_lines.append(line)
         portfolio_context = (
-            f"**Current Portfolio:**\n{holdings_lines}\n"
+            f"**Current Portfolio:**\n" + "\n".join(holdings_lines) + "\n"
             f"  - Cash available: ${portfolio['cash']:,.2f}\n"
         )
         allocation_instruction = (
@@ -1732,6 +1735,10 @@ def paper(
         "balanced", "--strategy", "-s",
         help="Investment risk strategy: conservative, balanced, aggressive",
     ),
+    tax_bracket: str = typer.Option(
+        "top", "--tax-bracket",
+        help="Tax bracket for sell analysis: top, mid, low, none",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1739,6 +1746,7 @@ def paper(
         submit_orders, resolve_credentials,
     )
     from cli.order_parser import parse_orders, format_pending_orders
+    from cli.tax import compute_tax_context, format_tax_context_for_prompt, format_tax_context_for_portfolio
 
     api_key, api_secret = resolve_credentials(key, secret)
 
@@ -1754,7 +1762,7 @@ def paper(
     client = create_client(api_key, api_secret, paper=not live)
 
     console.print("[cyan]Fetching portfolio and pending orders...[/cyan]")
-    portfolio, pending, position_prices = fetch_portfolio(client)
+    portfolio, pending, position_prices, position_details = fetch_portfolio(client)
 
     console.print(Panel(
         f"[bold]Alpaca Portfolio ({mode})[/bold]\n"
@@ -1803,6 +1811,16 @@ def paper(
     config = _build_config(selections)
 
     strategy_text = STRATEGY_PROFILES.get(strategy.lower(), STRATEGY_PROFILES["balanced"])
+
+    all_prices = {**position_prices, **quotes}
+    tax_ctx = {}
+    tax_prompt_str = ""
+    if tax_bracket.lower() != "none" and position_details:
+        tax_ctx = compute_tax_context(position_details, all_prices, bracket=tax_bracket.lower())
+        tax_prompt_str = format_tax_context_for_prompt(tax_ctx)
+        tax_portfolio_summaries = format_tax_context_for_portfolio(tax_ctx, position_details)
+    else:
+        tax_portfolio_summaries = {}
 
     console.print(Panel(
         f"[bold]Analysis Plan[/bold]\n"
@@ -1876,7 +1894,7 @@ def paper(
     portfolio_dict = portfolio.to_dict()
 
     console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
-    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
+    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
     report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
     console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
     console.print()
@@ -1884,7 +1902,7 @@ def paper(
 
     console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
     try:
-        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text)
+        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str)
     except Exception as e:
         console.print(f"[red]Trade plan generation failed: {e}[/red]")
         return

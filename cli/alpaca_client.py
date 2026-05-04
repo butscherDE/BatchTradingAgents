@@ -1,8 +1,10 @@
+import datetime
 import os
 from typing import Optional
 
 import typer
 from cli.portfolio import Portfolio
+from cli.tax import holding_period_type
 
 
 def create_client(key: str, secret: str, paper: bool = True):
@@ -11,19 +13,75 @@ def create_client(key: str, secret: str, paper: bool = True):
     return TradingClient(key, secret, paper=paper)
 
 
-def fetch_portfolio(client) -> tuple[Portfolio, list[dict], dict[str, float]]:
-    """Returns (portfolio, pending_orders, prices_by_symbol)."""
+def _fetch_earliest_fills(client, symbols: list[str]) -> dict[str, str]:
+    from alpaca.trading.requests import GetOrdersRequest
+    from alpaca.trading.enums import QueryOrderStatus, OrderSide
+
+    if not symbols:
+        return {}
+
+    try:
+        filled_orders = client.get_orders(
+            filter=GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                side=OrderSide.BUY,
+                limit=500,
+            )
+        )
+    except Exception:
+        return {}
+
+    earliest: dict[str, str] = {}
+    for order in filled_orders:
+        if order.symbol not in symbols:
+            continue
+        if order.filled_at is None:
+            continue
+        fill_date = order.filled_at.strftime("%Y-%m-%d")
+        if order.symbol not in earliest or fill_date < earliest[order.symbol]:
+            earliest[order.symbol] = fill_date
+
+    return earliest
+
+
+def fetch_portfolio(client) -> tuple[Portfolio, list[dict], dict[str, float], dict[str, dict]]:
+    """Returns (portfolio, pending_orders, prices_by_symbol, position_details)."""
     account = client.get_account()
     positions = client.get_all_positions()
 
     holdings: dict[str, float] = {}
     prices: dict[str, float] = {}
+    position_details: dict[str, dict] = {}
+
     for pos in positions:
-        holdings[pos.symbol] = float(pos.qty)
+        sym = pos.symbol
+        qty = float(pos.qty)
+        holdings[sym] = qty
         if pos.current_price is not None:
-            prices[pos.symbol] = float(pos.current_price)
+            prices[sym] = float(pos.current_price)
+
+        details: dict = {"qty": qty}
+        if pos.avg_entry_price is not None:
+            details["avg_entry_price"] = float(pos.avg_entry_price)
+        if pos.cost_basis is not None:
+            details["cost_basis"] = float(pos.cost_basis)
+        if pos.unrealized_pl is not None:
+            details["unrealized_pl"] = float(pos.unrealized_pl)
+        if pos.unrealized_plpc is not None:
+            details["unrealized_plpc"] = float(pos.unrealized_plpc)
+        position_details[sym] = details
 
     cash = float(account.cash)
+
+    earliest_fills = _fetch_earliest_fills(client, list(holdings.keys()))
+    for sym, fill_date in earliest_fills.items():
+        if sym in position_details:
+            position_details[sym]["earliest_fill"] = fill_date
+            position_details[sym]["holding_period"] = holding_period_type(fill_date)
+
+    for sym in position_details:
+        if "holding_period" not in position_details[sym]:
+            position_details[sym]["holding_period"] = "unknown"
 
     from alpaca.trading.requests import GetOrdersRequest
     from alpaca.trading.enums import QueryOrderStatus
@@ -46,7 +104,7 @@ def fetch_portfolio(client) -> tuple[Portfolio, list[dict], dict[str, float]]:
         pending.append(entry)
 
     portfolio = Portfolio(holdings=holdings, cash=cash)
-    return portfolio, pending, prices
+    return portfolio, pending, prices, position_details
 
 
 def fetch_quotes(client, tickers: list[str]) -> dict[str, float]:

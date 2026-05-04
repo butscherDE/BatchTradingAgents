@@ -183,6 +183,26 @@ tradingagents paper --dry-run --skip-analysis -s aggressive NUVL CYTK
 tradingagents paper --dry-run --skip-analysis -s conservative
 ```
 
+### Tax-Aware Selling
+
+The bot computes tax implications for each holding based on cost basis and holding period (short-term vs long-term capital gains). This is factored into both the merge report and trade recommendations.
+
+```bash
+# Top tax bracket (default) — 37% short-term, 20% long-term
+tradingagents paper --dry-run --skip-analysis --tax-bracket top
+
+# Mid bracket — 24% short-term, 15% long-term
+tradingagents paper --dry-run --skip-analysis --tax-bracket mid
+
+# Low bracket — 12% short-term, 0% long-term
+tradingagents paper --dry-run --skip-analysis --tax-bracket low
+
+# Disable tax awareness
+tradingagents paper --dry-run --skip-analysis --tax-bracket none
+```
+
+Holding period is determined from Alpaca order history (earliest filled buy order per symbol).
+
 ### All Options
 
 | Option | Short | Default | Description |
@@ -200,6 +220,7 @@ tradingagents paper --dry-run --skip-analysis -s conservative
 | `--dry-run` | | `false` | Show trades but do not submit orders |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
+| `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 
 ---
 

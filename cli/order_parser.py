@@ -96,6 +96,7 @@ def _stage1_allocations(
     quotes: dict[str, float],
     pending: list[dict],
     strategy: Optional[str] = None,
+    tax_context_str: str = "",
 ) -> AllocationPlan:
     holdings_str, cash, total_value = _build_holdings_context(portfolio_dict, quotes)
 
@@ -110,6 +111,8 @@ def _stage1_allocations(
     strategy_block = ""
     if strategy:
         strategy_block = f"\n**Investment Strategy:** {strategy}\nApply this risk profile when deciding allocations.\n"
+
+    tax_block = f"\n{tax_context_str}\n" if tax_context_str else ""
 
     # Compute current allocation percentages for context
     alloc_lines = []
@@ -137,7 +140,7 @@ def _stage1_allocations(
 
 **Quotes for Tickers Not in Portfolio:**
 {quotes_str}
-{strategy_block}
+{tax_block}{strategy_block}
 **Cross-Ticker Analysis Report:**
 
 {merge_report}
@@ -227,11 +230,13 @@ def parse_orders(
     pending: list[dict],
     config: dict,
     strategy: Optional[str] = None,
+    tax_context_str: str = "",
 ) -> TradePlan:
     llm = _get_llm(config)
 
     allocation = _stage1_allocations(
         llm, merge_report, portfolio_dict, quotes, pending, strategy,
+        tax_context_str=tax_context_str,
     )
 
     return _stage2_orders(allocation, portfolio_dict, quotes)
