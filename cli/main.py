@@ -1268,6 +1268,10 @@ def _print_batch_summary(results, output_dir):
             succeeded += 1
             status_str = "[green]SUCCESS[/green]"
             time_str = f"{elapsed:.0f}s"
+        elif status == "REUSED":
+            succeeded += 1
+            status_str = "[cyan]REUSED[/cyan]"
+            time_str = "-"
         else:
             status_str = "[red]FAILED[/red]"
             time_str = "-"
