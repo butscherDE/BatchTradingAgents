@@ -954,6 +954,16 @@ STRATEGY_PROFILES = {
         "small-cap positions can be 30%+ of portfolio. Only avoid a ticker if the analysis "
         "explicitly rates it Sell."
     ),
+    "yolo": (
+        "YOLO / Maximum Growth: Go all-in on absolute growth plays. Heavily favor speculative "
+        "biotech startups, AI/semiconductor moonshots, disruptive tech, and high-beta small-caps. "
+        "Actively avoid or exit stable ETFs, blue-chips, and dividend stocks — they are dead weight. "
+        "Diversify across multiple high-growth sectors (AI, biotech, SaaS, genomics, clean energy) "
+        "to avoid single-name blowup risk, but every position should have 2x+ upside potential. "
+        "Treat Overweight-rated tickers the same as Buy if they are in a high-growth sector. "
+        "Hold-rated tickers should be exited unless they are speculative names consolidating "
+        "before a catalyst. Embrace volatility — drawdowns are entry opportunities, not risks."
+    ),
 }
 
 PROVIDER_BACKEND_URLS = {
@@ -1530,7 +1540,7 @@ def batch(
     ),
     strategy: str = typer.Option(
         "balanced", "--strategy", "-s",
-        help="Investment risk strategy: conservative, balanced, aggressive",
+        help="Investment risk strategy: conservative, balanced, aggressive, yolo",
     ),
     reuse_today: bool = typer.Option(
         False, "--reuse-today",
@@ -1751,7 +1761,7 @@ def paper(
     ),
     strategy: str = typer.Option(
         "balanced", "--strategy", "-s",
-        help="Investment risk strategy: conservative, balanced, aggressive",
+        help="Investment risk strategy: conservative, balanced, aggressive, yolo",
     ),
     tax_bracket: str = typer.Option(
         "top", "--tax-bracket",

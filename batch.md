@@ -96,6 +96,9 @@ tradingagents batch AAPL NVDA NUVL
 
 # Aggressive — overweight high-risk/high-reward, speculative names can be 30%+
 tradingagents batch AAPL NVDA NUVL -s aggressive
+
+# YOLO — all-in on growth plays, exit stable ETFs/blue-chips, diversify across speculative sectors
+tradingagents batch NUVL CYTK NVDA ARKK -s yolo
 ```
 
 ### All Options
@@ -117,7 +120,7 @@ tradingagents batch AAPL NVDA NUVL -s aggressive
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
 | `--portfolio-format` | | *(auto)* | Force format: `etrade` or `generic` |
-| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
 
 ---
 
@@ -194,6 +197,9 @@ tradingagents paper --dry-run --skip-analysis -s aggressive NUVL CYTK
 
 # Conservative — favor stable positions, limit speculative exposure
 tradingagents paper --dry-run --skip-analysis -s conservative
+
+# YOLO — exit ETFs/blue-chips, go all-in on speculative growth plays
+tradingagents paper --dry-run --skip-analysis -s yolo NUVL CYTK
 ```
 
 ### Tax-Aware Selling
@@ -234,7 +240,7 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--auto-execute` | | `false` | Execute orders immediately without confirmation |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
-| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 
 ---
