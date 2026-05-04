@@ -56,6 +56,18 @@ NVDA,50
 CASH,20000
 ```
 
+### Reuse Today's Reports
+
+Only run analysis for tickers that don't already have a report from today. Tickers with a fresh report are loaded from disk.
+
+```bash
+# Analyze 5 tickers — if AAPL and NVDA already ran today, skip them
+tradingagents batch AAPL NVDA MSFT GOOGL AVGO --reuse-today
+
+# Combine with portfolio — only analyze what's new
+tradingagents batch --portfolio ~/Downloads/PortfolioDownload.csv --reuse-today
+```
+
 ### Merge-Only Mode
 
 Skip analysis entirely and generate a cross-ticker comparison from existing reports on disk.
@@ -100,6 +112,7 @@ tradingagents batch AAPL NVDA NUVL -s aggressive
 | `--language` | `-l` | `English` | Output language |
 | `--no-merge` | | `false` | Skip the cross-ticker merge report |
 | `--merge-only` | | `false` | Skip analysis; merge existing reports |
+| `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
 | `--portfolio` | | | CSV file with holdings (E\*Trade or generic) |
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
@@ -220,6 +233,7 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--dry-run` | | `false` | Show trades but do not submit orders |
 | `--auto-execute` | | `false` | Execute orders immediately without confirmation |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
+| `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 

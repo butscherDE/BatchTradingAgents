@@ -1532,6 +1532,10 @@ def batch(
         "balanced", "--strategy", "-s",
         help="Investment risk strategy: conservative, balanced, aggressive",
     ),
+    reuse_today: bool = typer.Option(
+        False, "--reuse-today",
+        help="Skip analysis for tickers that already have a report from today",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     from cli.portfolio import load_portfolio
@@ -1650,6 +1654,16 @@ def batch(
 
         ticker_output = output_dir / f"{ticker}_{analysis_date}"
 
+        if reuse_today and ticker_output.is_dir():
+            from tradingagents.agents.utils.rating import parse_rating as _parse_rating
+            existing_state = _load_report_from_disk(ticker_output)
+            if existing_state.get("final_trade_decision"):
+                decision = _parse_rating(existing_state["final_trade_decision"])
+                results.append((ticker, "REUSED", decision, 0))
+                completed_states.append((ticker, decision, existing_state))
+                console.print(f"[cyan]Reused today's report for {ticker} — {decision}[/cyan]")
+                continue
+
         try:
             result = _run_single_ticker(
                 ticker=ticker,
@@ -1742,6 +1756,10 @@ def paper(
     tax_bracket: str = typer.Option(
         "top", "--tax-bracket",
         help="Tax bracket for sell analysis: top, mid, low, none",
+    ),
+    reuse_today: bool = typer.Option(
+        False, "--reuse-today",
+        help="Skip analysis for tickers that already have a report from today",
     ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
@@ -1872,6 +1890,16 @@ def paper(
             console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
 
             ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+            if reuse_today and ticker_output.is_dir():
+                from tradingagents.agents.utils.rating import parse_rating as _parse_rating
+                existing_state = _load_report_from_disk(ticker_output)
+                if existing_state.get("final_trade_decision"):
+                    decision = _parse_rating(existing_state["final_trade_decision"])
+                    results.append((ticker, "REUSED", decision, 0))
+                    completed_states.append((ticker, decision, existing_state))
+                    console.print(f"[cyan]Reused today's report for {ticker} — {decision}[/cyan]")
+                    continue
 
             try:
                 result = _run_single_ticker(
