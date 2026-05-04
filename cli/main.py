@@ -1999,9 +1999,11 @@ def paper(
     )
     proj_table.add_column("Symbol", style="cyan", justify="center")
     proj_table.add_column("Qty", justify="right")
+    proj_table.add_column("%", justify="right")
     proj_table.add_column("Price", justify="right")
     proj_table.add_column("Value", justify="right")
 
+    rows = []
     total_value = 0.0
     for sym in sorted(projected_holdings):
         qty = projected_holdings[sym]
@@ -2009,13 +2011,23 @@ def paper(
         if price is not None:
             val = qty * price
             total_value += val
-            proj_table.add_row(sym, f"{qty:,.2f}", f"${price:,.2f}", f"${val:,.2f}")
+            rows.append((sym, qty, price, val))
         else:
-            proj_table.add_row(sym, f"{qty:,.2f}", "—", "—")
+            rows.append((sym, qty, None, None))
 
-    proj_table.add_row("", "", "", "─" * 12, style="dim")
-    proj_table.add_row("CASH", "", "", f"${projected_cash:,.2f}", style="bold")
-    proj_table.add_row("TOTAL", "", "", f"${total_value + projected_cash:,.2f}", style="bold green")
+    grand_total = total_value + projected_cash
+
+    for sym, qty, price, val in rows:
+        if val is not None:
+            pct = (val / grand_total * 100) if grand_total > 0 else 0
+            proj_table.add_row(sym, f"{qty:,.2f}", f"{pct:.1f}%", f"${price:,.2f}", f"${val:,.2f}")
+        else:
+            proj_table.add_row(sym, f"{qty:,.2f}", "—", "—", "—")
+
+    cash_pct = (projected_cash / grand_total * 100) if grand_total > 0 else 0
+    proj_table.add_row("", "", "", "", "─" * 12, style="dim")
+    proj_table.add_row("CASH", "", f"{cash_pct:.1f}%", "", f"${projected_cash:,.2f}", style="bold")
+    proj_table.add_row("TOTAL", "", "100%", "", f"${grand_total:,.2f}", style="bold green")
     console.print(proj_table)
 
     if dry_run:
