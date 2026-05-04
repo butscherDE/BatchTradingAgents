@@ -1732,6 +1732,10 @@ def paper(
 
     extra_tickers = [normalize_ticker_symbol(t) for t in tickers] if tickers else []
     all_tickers = list(portfolio.ticker_symbols())
+    for o in pending:
+        sym = o["symbol"]
+        if sym not in all_tickers:
+            all_tickers.append(sym)
     for t in extra_tickers:
         if t not in all_tickers:
             all_tickers.append(t)
