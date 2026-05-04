@@ -94,7 +94,8 @@ def parse_orders(
 **Rules:**
 - Only output orders that the analysis report supports. If the report says Hold, do not trade that ticker.
 - Sell quantity must not exceed the current holding quantity for that symbol.
-- Total buy cost (qty * approximate price) must not exceed available cash.
+- Cash from sell orders is available to fund buy orders. Compute your effective buying power as: available cash + total estimated sell proceeds. Total buy cost must not exceed this effective buying power.
+- Deploy the effective buying power aggressively across the report's Buy-rated tickers, proportional to their conviction ranking. Do not leave large cash reserves unless the report explicitly recommends it.
 - Do not duplicate or conflict with any pending orders listed above.
 - Use whole share quantities only.
 - If no action is warranted, return an empty orders list.
