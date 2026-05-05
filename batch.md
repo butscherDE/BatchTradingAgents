@@ -99,6 +99,9 @@ tradingagents batch AAPL NVDA NUVL -s aggressive
 
 # YOLO — all-in on growth plays, exit stable ETFs/blue-chips, diversify across speculative sectors
 tradingagents batch NUVL CYTK NVDA ARKK -s yolo
+
+# Mean — exploit geopolitical chaos, deregulation, fossil resurgence, inequality
+tradingagents batch LMT RTX XOM GEO PLTR -s mean
 ```
 
 ### All Options
@@ -121,7 +124,7 @@ tradingagents batch NUVL CYTK NVDA ARKK -s yolo
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
 | `--portfolio-format` | | *(auto)* | Force format: `etrade` or `generic` |
-| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo`, `mean` |
 
 ---
 
@@ -218,6 +221,26 @@ tradingagents paper --dry-run --skip-analysis -s conservative
 
 # YOLO — exit ETFs/blue-chips, go all-in on speculative growth plays
 tradingagents paper --dry-run --skip-analysis -s yolo NUVL CYTK
+
+# Mean — exploit geopolitical tension, fossil resurgence, deregulation
+tradingagents paper --dry-run --skip-analysis -s mean LMT XOM GEO
+```
+
+### Stop-Loss Guidance
+
+By default, the merge report and allocation step receive position performance data (entry price, current price, drawdown %) with strategy-calibrated stop-loss instructions. Thresholds adapt to the strategy:
+
+| Strategy | Warning | Critical | Behavior |
+|----------|---------|----------|----------|
+| conservative | -15% | -25% | Strong sell signal; exit at critical |
+| balanced | -20% | -35% | Sell signal unless thesis justifies holding |
+| aggressive | -35% | -50% | Only flag if thesis appears broken |
+| yolo | -50% | -70% | Context only; drawdowns may be add opportunities |
+| mean | -30% | -45% | Review if policy catalyst weakened; exit if reversed |
+
+```bash
+# Disable stop-loss guidance entirely
+tradingagents paper --no-stop-loss
 ```
 
 ### Tax-Aware Selling
@@ -261,8 +284,9 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--reuse-merge` | | `false` | Skip merge report generation; reuse last saved merge report (fails if none) |
 | `--merge-checks` | | `0` | Validation passes on the merge report |
 | `--allocation-checks` | | `0` | Validation passes on the allocation plan |
-| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
+| `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo`, `mean` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
+| `--no-stop-loss` | | `false` | Disable position drawdown guidance in merge/allocation prompts |
 
 ---
 

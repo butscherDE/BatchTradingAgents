@@ -964,6 +964,19 @@ STRATEGY_PROFILES = {
         "Hold-rated tickers should be exited unless they are speculative names consolidating "
         "before a catalyst. Embrace volatility — drawdowns are entry opportunities, not risks."
     ),
+    "mean": (
+        "Mean / Exploit Macro Chaos: Optimize for profit in a world of rising geopolitical tension, "
+        "neoliberal deregulation, widening inequality, and fossil fuel resurgence. Favor: "
+        "defense contractors and weapons manufacturers (war risk = revenue); private prisons and "
+        "surveillance tech (inequality + authoritarian drift); legacy oil, gas, coal, and uranium "
+        "miners (fossil/nuclear renaissance, anti-ESG policy); payday lenders, debt collectors, "
+        "and predatory fintech (inequality = demand); big pharma with pricing power and opioid/GLP-1 "
+        "franchises; social media platforms profiting from polarization and engagement addiction. "
+        "Avoid: ESG-focused funds, renewables-only plays, companies dependent on multilateral trade "
+        "agreements, and anything requiring stable international cooperation. "
+        "Weight positions by proximity to government spending and regulatory capture. "
+        "The thesis is simple: instability is the product — invest in those who sell it."
+    ),
 }
 
 PROVIDER_BACKEND_URLS = {

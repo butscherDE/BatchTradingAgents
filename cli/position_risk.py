@@ -39,6 +39,17 @@ STRATEGY_THRESHOLDS = {
             "not merely because the price is down."
         ),
     },
+    "mean": {
+        "warning_pct": 30,
+        "critical_pct": 45,
+        "instruction": (
+            "These positions are tied to macro policy tailwinds (defense spending, deregulation, "
+            "fossil fuel subsidies). A drawdown >30% may signal the political thesis is weakening — "
+            "review whether the regulatory or geopolitical catalyst is still intact. "
+            "Exit at >45% only if the policy environment has reversed (e.g., defense cuts, "
+            "re-regulation, international de-escalation)."
+        ),
+    },
 }
 
 
