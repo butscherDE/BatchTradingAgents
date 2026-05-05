@@ -90,6 +90,18 @@ class PipelineStatus:
         self.alloc_completed += 1
 
 
+def extract_report_oneliner(final_trade_decision: str, ticker: str, decision: str) -> str:
+    for line in final_trade_decision.splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith("**executive summary**:") or stripped.lower().startswith("**executive summary:**"):
+            summary = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
+            first_sentence = summary.split(". ")[0]
+            if first_sentence:
+                return f"{ticker} — {decision}: {first_sentence}."
+            break
+    return f"{ticker} — {decision}"
+
+
 def create_pipeline_layout():
     layout = Layout()
     layout.split_column(
