@@ -1410,6 +1410,64 @@ Be decisive. Ground every conclusion in specific evidence from the analyst repor
     return response.content
 
 
+def _validate_merge_report(merge_report, ticker_results, config, strategy=None, portfolio=None):
+    from tradingagents.llm_clients import create_llm_client
+
+    llm_kwargs = {}
+    provider = config.get("llm_provider", "").lower()
+    if provider == "google" and config.get("google_thinking_level"):
+        llm_kwargs["thinking_level"] = config["google_thinking_level"]
+    elif provider == "openai" and config.get("openai_reasoning_effort"):
+        llm_kwargs["reasoning_effort"] = config["openai_reasoning_effort"]
+    elif provider == "anthropic" and config.get("anthropic_effort"):
+        llm_kwargs["effort"] = config["anthropic_effort"]
+
+    client = create_llm_client(
+        provider=config["llm_provider"],
+        model=config["deep_think_llm"],
+        base_url=config.get("backend_url"),
+        **llm_kwargs,
+    )
+    llm = client.get_llm()
+
+    ticker_summaries = []
+    for ticker, decision, final_state in ticker_results:
+        ftd = final_state.get("final_trade_decision", "")
+        ticker_summaries.append(f"- **{ticker}**: Rating = {decision}\n  Decision: {ftd[:500]}")
+    ticker_summaries_str = "\n".join(ticker_summaries)
+
+    strategy_str = f"\n**Active Strategy:** {strategy}\n" if strategy else ""
+
+    portfolio_str = ""
+    if portfolio:
+        holdings = ", ".join(f"{s}: {q} shares" for s, q in portfolio["holdings"].items())
+        portfolio_str = f"\n**Current Portfolio:** {holdings}, Cash: ${portfolio['cash']:,.2f}\n"
+
+    prompt = f"""You are a senior investment analyst reviewing a cross-ticker comparison report for factual accuracy and internal consistency.
+
+**Per-Ticker Analysis Results (ground truth):**
+{ticker_summaries_str}
+{strategy_str}{portfolio_str}
+**Cross-Ticker Comparison Report to Validate:**
+
+{merge_report}
+
+---
+
+**Validation Checklist — check each item:**
+1. All {len(ticker_results)} tickers appear in the Comparative Ranking. List any missing.
+2. If the report changes a ticker's rating from the per-ticker analysis, it must cite a specific cross-ticker dependency as justification. Flag unjustified rating changes.
+3. The Capital Allocation section is consistent with the ranking — higher-ranked tickers should receive proportionally more allocation.
+4. The strategy "{strategy or 'balanced'}" is respected in tone and recommendations.
+5. No hallucinated facts — every claim should be traceable to the per-ticker analysis.
+6. Cross-Cutting Risks reference actual tickers from the analysis, not invented ones.
+
+**Your task:** If you find issues, output a CORRECTED version of the full report (same 5 sections, same format). If the report passes all checks, output it unchanged. Do NOT add commentary outside the report — output only the report itself."""
+
+    response = llm.invoke(prompt)
+    return response.content
+
+
 def _find_latest_report_dir(output_dir, ticker):
     """Find the most recent report directory for a ticker.
 
@@ -1550,6 +1608,10 @@ def batch(
         False, "--reuse-today",
         help="Skip analysis for tickers that already have a report from today",
     ),
+    merge_checks: int = typer.Option(
+        0, "--merge-checks",
+        help="Number of validation passes on the merge report",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     from cli.portfolio import load_portfolio
@@ -1633,6 +1695,9 @@ def batch(
 
         console.print(f"\n[bold cyan]Generating cross-ticker comparison report for {len(completed_states)} tickers...[/bold cyan]")
         report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
+        for i in range(merge_checks):
+            console.print(f"[cyan]Merge validation pass {i + 1}/{merge_checks}...[/cyan]")
+            report = _validate_merge_report(report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
         report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
         console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
         console.print()
@@ -1700,6 +1765,9 @@ def batch(
         console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
         try:
             report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text)
+            for i in range(merge_checks):
+                console.print(f"[cyan]Merge validation pass {i + 1}/{merge_checks}...[/cyan]")
+                report = _validate_merge_report(report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
             report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
             console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
             console.print()
@@ -1774,6 +1842,14 @@ def paper(
     reuse_today: bool = typer.Option(
         False, "--reuse-today",
         help="Skip analysis for tickers that already have a report from today",
+    ),
+    merge_checks: int = typer.Option(
+        0, "--merge-checks",
+        help="Number of validation passes on the merge report",
+    ),
+    allocation_checks: int = typer.Option(
+        0, "--allocation-checks",
+        help="Number of validation passes on the allocation plan",
     ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
@@ -1941,6 +2017,11 @@ def paper(
 
     console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
     merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
+
+    for i in range(merge_checks):
+        console.print(f"[cyan]Merge validation pass {i + 1}/{merge_checks}...[/cyan]")
+        merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
+
     report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
     console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
     console.print()
@@ -1948,7 +2029,7 @@ def paper(
 
     console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
     try:
-        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str)
+        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks)
     except Exception as e:
         console.print(f"[red]Trade plan generation failed: {e}[/red]")
         return

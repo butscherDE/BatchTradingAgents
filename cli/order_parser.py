@@ -161,6 +161,49 @@ def _stage1_allocations(
     return structured_llm.invoke(prompt)
 
 
+def _validate_allocation(
+    llm,
+    allocation: AllocationPlan,
+    merge_report: str,
+    strategy: Optional[str] = None,
+) -> AllocationPlan:
+    alloc_lines = []
+    for a in allocation.allocations:
+        alloc_lines.append(f"  - {a.symbol}: {a.action} → {a.pct:.1f}%")
+    alloc_lines.append(f"  - CASH: {allocation.cash_pct:.1f}%")
+    alloc_str = "\n".join(alloc_lines)
+
+    total = sum(a.pct for a in allocation.allocations) + allocation.cash_pct
+
+    strategy_block = f"\n**Active Strategy:** {strategy}\n" if strategy else ""
+
+    prompt = f"""You are a portfolio compliance officer validating that an allocation plan matches the cross-ticker analysis report that produced it.
+
+**Current Allocation Plan:**
+{alloc_str}
+Total: {total:.1f}%
+Reasoning: {allocation.reasoning}
+{strategy_block}
+**Cross-Ticker Analysis Report (source of truth for rankings and recommendations):**
+
+{merge_report}
+
+---
+
+**Validation Checklist:**
+1. Ranking-allocation consistency: if the report ranks Ticker A higher than Ticker B, A's allocation % should be ≥ B's.
+2. Action-rating alignment: a ticker rated Buy/Overweight in the report should have action "buy" with meaningful %. A ticker rated Sell/Underweight should have action "sell" or reduced %.
+3. All Buy/Overweight-rated tickers from the report's ranking are present in the allocation.
+4. Strategy compliance: the allocations match the stated investment strategy.
+5. Percentages sum to 100 (±2% for rounding).
+6. No ticker appears that wasn't discussed in the report.
+
+**Your task:** If you find issues, output a CORRECTED allocation with the same format. Fix percentage inconsistencies, add missing tickers, and ensure ranking order is respected. If the allocation passes all checks, return it unchanged."""
+
+    structured_llm = llm.with_structured_output(AllocationPlan)
+    return structured_llm.invoke(prompt)
+
+
 def _stage2_orders(
     allocation: AllocationPlan,
     portfolio_dict: dict,
@@ -237,6 +280,7 @@ def parse_orders(
     config: dict,
     strategy: Optional[str] = None,
     tax_context_str: str = "",
+    allocation_checks: int = 0,
 ) -> TradePlan:
     llm = _get_llm(config)
 
@@ -244,5 +288,8 @@ def parse_orders(
         llm, merge_report, portfolio_dict, quotes, pending, strategy,
         tax_context_str=tax_context_str,
     )
+
+    for i in range(allocation_checks):
+        allocation = _validate_allocation(llm, allocation, merge_report, strategy)
 
     return _stage2_orders(allocation, portfolio_dict, quotes)

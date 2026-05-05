@@ -116,6 +116,7 @@ tradingagents batch NUVL CYTK NVDA ARKK -s yolo
 | `--no-merge` | | `false` | Skip the cross-ticker merge report |
 | `--merge-only` | | `false` | Skip analysis; merge existing reports |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
+| `--merge-checks` | | `0` | Validation passes on the merge report |
 | `--portfolio` | | | CSV file with holdings (E\*Trade or generic) |
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
@@ -240,6 +241,8 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--auto-execute` | | `false` | Execute orders immediately without confirmation |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
+| `--merge-checks` | | `0` | Validation passes on the merge report |
+| `--allocation-checks` | | `0` | Validation passes on the allocation plan |
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 
