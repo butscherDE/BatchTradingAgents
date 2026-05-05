@@ -1786,7 +1786,8 @@ def batch(
                 )
                 results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
                 completed_states.append((ticker, result["decision"], result["final_state"]))
-                pipeline.mark_ticker_done(ticker, result["decision"])
+                summary = extract_report_summary(result["final_state"].get("final_trade_decision", ""), ticker, result["decision"])
+                pipeline.mark_ticker_done(ticker, summary)
             except Exception as e:
                 results.append((ticker, "FAILED", str(e), 0))
                 pipeline.mark_ticker_failed(ticker, str(e))
@@ -2046,7 +2047,8 @@ def paper(
                     )
                     results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
                     completed_states.append((ticker, result["decision"], result["final_state"]))
-                    pipeline.mark_ticker_done(ticker, result["decision"])
+                    summary = extract_report_summary(result["final_state"].get("final_trade_decision", ""), ticker, result["decision"])
+                    pipeline.mark_ticker_done(ticker, summary)
                 except Exception as e:
                     results.append((ticker, "FAILED", str(e), 0))
                     pipeline.mark_ticker_failed(ticker, str(e))
