@@ -166,36 +166,53 @@ Show proposed trades without submitting orders.
 tradingagents paper --dry-run NVDA
 
 # Skip analysis too — fastest way to see what it would do
-tradingagents paper --dry-run --skip-analysis
+tradingagents paper --dry-run -u skip
 ```
 
-### Skip Analysis
+### Update Strategy
 
-Use existing reports from the output directory instead of running the full analysis pipeline. Useful for fast re-runs after a previous `batch` or `paper` run.
+Controls how much analysis to run before trading. Set with `--update-strategy` (or `-t`).
+
+| Strategy | Behavior |
+|----------|----------|
+| `skip` | Load existing reports only — no analysis |
+| `numeric` | Check prices; only re-analyze tickers with stop-loss/concentration alerts |
+| `headlines` | + fetch news; re-analyze if thesis invalidated |
+| `escalate` | + re-analyze all yellow and red flagged tickers |
+| `full` | Re-analyze everything (default) |
 
 ```bash
-# Load existing reports and execute trades
-tradingagents paper --skip-analysis
+# Use existing reports (fastest)
+tradingagents paper -u skip
 
-# Load reports + dry run (no analysis, no execution)
-tradingagents paper --dry-run --skip-analysis NVDA
+# Only re-analyze tickers that hit price alerts
+tradingagents paper -t numeric
+
+# Check news + re-analyze if thesis broken
+tradingagents paper -u headlines
+
+# Re-analyze anything flagged yellow or red
+tradingagents paper -u escalate
+
+# Full re-analysis (default)
+tradingagents paper -u full
 ```
 
 Tickers without an existing report are skipped with a warning.
 
 ### Reuse Last Merge Report
 
-Skip the merge report step entirely and reuse the most recent `_comparison/merge_report.md` from the output directory. The command fails fast if no merge report exists. Combine with `--skip-analysis` to re-run trade allocation against an already-produced merge without re-doing per-ticker analyses.
+Skip the merge report step entirely and reuse the most recent `_comparison/merge_report.md` from the output directory. The command fails fast if no merge report exists. Combine with `-u skip` to re-run trade allocation against an already-produced merge without re-doing per-ticker analyses.
 
 ```bash
 # Reuse last merge — still runs analyses, but skips the merge generation step
 tradingagents paper --reuse-merge
 
 # Fastest re-run: skip analysis and reuse the last merge to recompute allocation only
-tradingagents paper --skip-analysis --reuse-merge
+tradingagents paper -u skip --reuse-merge
 
 # Pair with --dry-run to inspect the trade plan without submitting orders
-tradingagents paper --skip-analysis --reuse-merge --dry-run
+tradingagents paper -u skip --reuse-merge --dry-run
 ```
 
 When `--reuse-merge` is set, `--merge-checks` is ignored.
@@ -215,16 +232,16 @@ Same strategy flag as `batch` — controls risk appetite for the merge report an
 
 ```bash
 # Aggressive — will size into high-risk tickers more heavily
-tradingagents paper --dry-run --skip-analysis -s aggressive NUVL CYTK
+tradingagents paper --dry-run -u skip -s aggressive NUVL CYTK
 
 # Conservative — favor stable positions, limit speculative exposure
-tradingagents paper --dry-run --skip-analysis -s conservative
+tradingagents paper --dry-run -u skip -s conservative
 
 # YOLO — exit ETFs/blue-chips, go all-in on speculative growth plays
-tradingagents paper --dry-run --skip-analysis -s yolo NUVL CYTK
+tradingagents paper --dry-run -u skip -s yolo NUVL CYTK
 
 # Mean — exploit geopolitical tension, fossil resurgence, deregulation
-tradingagents paper --dry-run --skip-analysis -s mean LMT XOM GEO
+tradingagents paper --dry-run -u skip -s mean LMT XOM GEO
 ```
 
 ### Stop-Loss Guidance
@@ -250,16 +267,16 @@ The bot computes tax implications for each holding based on cost basis and holdi
 
 ```bash
 # Top tax bracket (default) — 37% short-term, 20% long-term
-tradingagents paper --dry-run --skip-analysis --tax-bracket top
+tradingagents paper --dry-run -u skip --tax-bracket top
 
 # Mid bracket — 24% short-term, 15% long-term
-tradingagents paper --dry-run --skip-analysis --tax-bracket mid
+tradingagents paper --dry-run -u skip --tax-bracket mid
 
 # Low bracket — 12% short-term, 0% long-term
-tradingagents paper --dry-run --skip-analysis --tax-bracket low
+tradingagents paper --dry-run -u skip --tax-bracket low
 
 # Disable tax awareness
-tradingagents paper --dry-run --skip-analysis --tax-bracket none
+tradingagents paper --dry-run -u skip --tax-bracket none
 ```
 
 Holding period is determined from Alpaca order history (earliest filled buy order per symbol).
@@ -280,7 +297,7 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--language` | `-l` | `English` | Output language |
 | `--dry-run` | | `false` | Show trades but do not submit orders |
 | `--auto-execute` | | `false` | Execute orders immediately without confirmation |
-| `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
+| `--update-strategy` | `-u` | `full` | Analysis depth: `skip`, `numeric`, `headlines`, `escalate`, `full` |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
 | `--reuse-merge` | | `false` | Skip merge report generation; reuse last saved merge report (fails if none) |
 | `--merge-checks` | | `0` | Validation passes on the merge report |
@@ -344,16 +361,16 @@ Quick portfolio sanity check without running the full analysis pipeline. Connect
 tradingagents check
 
 # Include news headline validation
-tradingagents check -t headlines
+tradingagents check -u headlines
 
 # Auto-escalate: re-analyze anything that flags red
-tradingagents check -t escalate
+tradingagents check -u escalate
 
 # Full: check everything, then re-analyze all positions
-tradingagents check -t full
+tradingagents check -u full
 
 # Check specific tickers (in addition to portfolio holdings)
-tradingagents check NUVL CYTK -t headlines
+tradingagents check NUVL CYTK -u headlines
 
 # Cron-friendly: exit code 0 = all clear, 1 = red alerts
 tradingagents check --quiet
@@ -362,7 +379,7 @@ tradingagents check --quiet
 tradingagents check -s aggressive
 
 # With custom LLM for headline validation
-tradingagents check -t headlines -p openai --quick-model gpt-4o-mini
+tradingagents check -u headlines -p openai --quick-model gpt-4o-mini
 ```
 
 ### Numeric Checks
@@ -386,7 +403,7 @@ For each ticker with a previous report on disk, fetches recent news via Alpaca N
 | `--live` | | `false` | Use live trading account |
 | `--output-dir` | `-o` | `./reports` | Directory with existing reports |
 | `--strategy` | `-s` | `balanced` | Strategy for stop-loss thresholds |
-| `--update-strategy` | `-t` | `numeric` | Check depth: `numeric`, `headlines`, `escalate`, `full` |
+| `--update-strategy` | `-u` | `numeric` | Check depth: `numeric`, `headlines`, `escalate`, `full` |
 | `--provider` | `-p` | `ollama` | LLM provider (headlines/escalate) |
 | `--quick-model` | | `qwen3:8b` | Model for headline validation |
 | `--deep-model` | | `qwen3:32b` | Model for escalated re-analysis |

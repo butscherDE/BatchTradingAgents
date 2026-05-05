@@ -1899,9 +1899,9 @@ def paper(
         False, "--auto-execute",
         help="Execute orders immediately without confirmation prompt",
     ),
-    skip_analysis: bool = typer.Option(
-        False, "--skip-analysis",
-        help="Skip ticker analysis; use latest existing reports from output dir",
+    update_strategy: str = typer.Option(
+        "full", "--update-strategy", "-u",
+        help="Analysis depth: skip (use existing reports), numeric (re-analyze on price alerts), headlines (+ news validation), escalate (+ re-analyze red-flagged), full (re-analyze all)",
     ),
     strategy: str = typer.Option(
         "balanced", "--strategy", "-s",
@@ -2052,36 +2052,107 @@ def paper(
     with PipelineLive(pipeline_layout, refresh_per_second=4, console=console):
         update_pipeline_display(pipeline_layout, pipeline)
 
-        if skip_analysis:
-            from tradingagents.agents.utils.rating import parse_rating
+        # Determine which tickers need re-analysis based on update_strategy
+        tickers_to_analyze = set()
+        us = update_strategy.lower()
 
-            for ticker in all_tickers:
-                pipeline.mark_ticker_active(ticker)
+        if us == "full":
+            tickers_to_analyze = set(all_tickers)
+        elif us == "skip":
+            tickers_to_analyze = set()
+        elif us in ("numeric", "headlines", "escalate"):
+            from cli.check import (
+                run_numeric_checks, fetch_news_headlines,
+                validate_thesis_against_news, extract_thesis_oneliner,
+            )
+
+            check_result = run_numeric_checks(
+                position_details=position_details,
+                current_prices={**position_prices, **quotes},
+                portfolio_value=sum(
+                    qty * position_prices.get(sym, 0)
+                    for sym, qty in portfolio.holdings.items()
+                ) + portfolio.cash,
+                previous_portfolio_value=None,
+                strategy=strategy.lower(),
+            )
+
+            if us in ("headlines", "escalate"):
+                news_headlines = fetch_news_headlines(api_key, api_secret, all_tickers)
+                from tradingagents.llm_clients import create_llm_client as _create_check_llm
+                _check_client = _create_check_llm(
+                    provider=config["llm_provider"],
+                    model=config["shallow_think_llm"],
+                    base_url=config.get("backend_url"),
+                )
+                _check_llm = _check_client.get_llm()
+
+                for sym in all_tickers:
+                    sym_headlines = news_headlines.get(sym, [])
+                    if not sym_headlines:
+                        continue
+                    report_dir = _find_latest_report_dir(output_dir, sym)
+                    if not report_dir:
+                        continue
+                    state = _load_report_from_disk(report_dir)
+                    ftd = state.get("final_trade_decision", "")
+                    if not ftd:
+                        continue
+                    thesis = extract_thesis_oneliner(ftd)
+                    invalidated, reason = validate_thesis_against_news(_check_llm, sym, thesis, sym_headlines)
+                    if invalidated:
+                        check_result.add_alert(sym, "red", f"thesis invalidated: {reason}")
+
+            # Determine flagged tickers
+            if us == "numeric":
+                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level == "red"}
+            elif us == "headlines":
+                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level == "red"}
+            elif us == "escalate":
+                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level in ("red", "yellow")}
+
+            if tickers_to_analyze:
+                pipeline._append_output(f"Health check flagged: {', '.join(sorted(tickers_to_analyze))}")
                 update_pipeline_display(pipeline_layout, pipeline)
 
-                report_dir = _find_latest_report_dir(output_dir, ticker)
-                if report_dir is None:
-                    pipeline.mark_ticker_failed(ticker, "no report found")
-                    update_pipeline_display(pipeline_layout, pipeline)
-                    continue
-                final_state = _load_report_from_disk(report_dir)
-                if not final_state.get("final_trade_decision"):
-                    pipeline.mark_ticker_failed(ticker, "no portfolio decision")
-                    update_pipeline_display(pipeline_layout, pipeline)
-                    continue
-                decision = parse_rating(final_state["final_trade_decision"])
-                completed_states.append((ticker, decision, final_state))
-                summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
-                pipeline.mark_ticker_reused(ticker, summary)
+        # Load existing reports for tickers we won't re-analyze
+        from tradingagents.agents.utils.rating import parse_rating
+
+        for ticker in all_tickers:
+            if ticker in tickers_to_analyze:
+                continue
+
+            pipeline.mark_ticker_active(ticker)
+            update_pipeline_display(pipeline_layout, pipeline)
+
+            report_dir = _find_latest_report_dir(output_dir, ticker)
+            if report_dir is None:
+                pipeline.mark_ticker_failed(ticker, "no report found")
                 update_pipeline_display(pipeline_layout, pipeline)
-        else:
+                continue
+            final_state = _load_report_from_disk(report_dir)
+            if not final_state.get("final_trade_decision"):
+                pipeline.mark_ticker_failed(ticker, "no portfolio decision")
+                update_pipeline_display(pipeline_layout, pipeline)
+                continue
+            decision = parse_rating(final_state["final_trade_decision"])
+            completed_states.append((ticker, decision, final_state))
+            summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
+            pipeline.mark_ticker_reused(ticker, summary)
+            update_pipeline_display(pipeline_layout, pipeline)
+
+        # Run full analysis for tickers that need it
+        if tickers_to_analyze:
             graph = TradingAgentsGraph(
                 all_analyst_keys,
                 config=config,
                 debug=True,
             )
 
-            for i, ticker in enumerate(all_tickers, 1):
+            for ticker in all_tickers:
+                if ticker not in tickers_to_analyze:
+                    continue
+
                 pipeline.mark_ticker_active(ticker)
                 update_pipeline_display(pipeline_layout, pipeline)
 
@@ -2414,7 +2485,7 @@ def check(
         help="Strategy for stop-loss thresholds: conservative, balanced, aggressive, yolo, mean",
     ),
     update_strategy: str = typer.Option(
-        "numeric", "--update-strategy", "-t",
+        "numeric", "--update-strategy", "-u",
         help="Check depth: numeric (prices only), headlines (+ news validation), escalate (+ re-analyze flagged), full (re-analyze all + merge)",
     ),
     provider: str = typer.Option(
