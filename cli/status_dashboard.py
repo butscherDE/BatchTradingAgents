@@ -1,12 +1,13 @@
 import time
 from dataclasses import dataclass, field
 
-from rich.console import Console
+from rich.console import Console, ConsoleOptions, RenderResult, RenderableType
 from rich.layout import Layout
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.text import Text
 from rich import box
+from rich.measure import Measurement
 
 
 @dataclass
@@ -191,28 +192,42 @@ def _build_ticker_line(status: PipelineStatus, max_width: int = 100) -> Text:
     return text
 
 
+class _LiveStatusRenderable:
+    """Renderable that recomputes timers on every Rich refresh frame."""
+
+    def __init__(self, status: PipelineStatus):
+        self.status = status
+
+    def __rich_console__(self, console: Console, options: ConsoleOptions) -> RenderResult:
+        status = self.status
+        now = time.time()
+        step_elapsed = _format_elapsed(now - status.step_start)
+        total_elapsed = _format_elapsed(now - status.total_start)
+
+        ticker_line = _build_ticker_line(status, max_width=options.max_width - 12)
+
+        phase_parts = [f"Tickers ({status.completed_tickers}/{status.total_tickers})"]
+        phase_parts.append(f"Merge ({status.merge_completed}/{status.merge_total})")
+        if status.show_allocation:
+            phase_parts.append(f"Alloc ({status.alloc_completed}/{status.alloc_total})")
+
+        phase_str = " │ ".join(phase_parts)
+        time_str = f"Step: {step_elapsed} │ Total: {total_elapsed}"
+
+        content = Text()
+        content.append("Tickers: ")
+        content.append_text(ticker_line)
+        content.append(f"\n\n{phase_str}\n{time_str}")
+
+        yield content
+
+    def __rich_measure__(self, console: Console, options: ConsoleOptions) -> Measurement:
+        return Measurement(options.min_width, options.max_width)
+
+
 def update_pipeline_display(layout: Layout, status: PipelineStatus):
-    now = time.time()
-    step_elapsed = _format_elapsed(now - status.step_start)
-    total_elapsed = _format_elapsed(now - status.total_start)
-
-    ticker_line = _build_ticker_line(status)
-
-    phase_parts = [f"Tickers ({status.completed_tickers}/{status.total_tickers})"]
-    phase_parts.append(f"Merge ({status.merge_completed}/{status.merge_total})")
-    if status.show_allocation:
-        phase_parts.append(f"Alloc ({status.alloc_completed}/{status.alloc_total})")
-
-    phase_str = " │ ".join(phase_parts)
-    time_str = f"Step: {step_elapsed} │ Total: {total_elapsed}"
-
-    status_content = Text()
-    status_content.append("Tickers: ")
-    status_content.append_text(ticker_line)
-    status_content.append(f"\n\n{phase_str}\n{time_str}")
-
     layout["status"].update(
-        Panel(status_content, title="Pipeline Status", border_style="cyan", padding=(0, 2))
+        Panel(_LiveStatusRenderable(status), title="Pipeline Status", border_style="cyan", padding=(0, 2))
     )
 
     # Show complete report entries only — never truncate mid-entry.
