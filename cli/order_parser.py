@@ -284,6 +284,8 @@ def parse_orders(
     tax_context_str: str = "",
     allocation_checks: int = 0,
     risk_context_str: str = "",
+    on_check_start: Optional[callable] = None,
+    on_check_done: Optional[callable] = None,
 ) -> TradePlan:
     llm = _get_llm(config)
 
@@ -294,6 +296,10 @@ def parse_orders(
     )
 
     for i in range(allocation_checks):
+        if on_check_start:
+            on_check_start(i + 1, allocation_checks)
         allocation = _validate_allocation(llm, allocation, merge_report, strategy)
+        if on_check_done:
+            on_check_done()
 
     return _stage2_orders(allocation, portfolio_dict, quotes)

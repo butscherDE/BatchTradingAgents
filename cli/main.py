@@ -2082,7 +2082,7 @@ def paper(
                 from tradingagents.llm_clients import create_llm_client as _create_check_llm
                 _check_client = _create_check_llm(
                     provider=config["llm_provider"],
-                    model=config["shallow_think_llm"],
+                    model=config["quick_think_llm"],
                     base_url=config.get("backend_url"),
                 )
                 _check_llm = _check_client.get_llm()
@@ -2240,7 +2240,15 @@ def paper(
             pipeline.start_allocation()
             update_pipeline_display(pipeline_layout, pipeline)
             try:
-                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str)
+                def _on_alloc_check_start(i, total):
+                    pipeline.start_alloc_check(i, total)
+                    update_pipeline_display(pipeline_layout, pipeline)
+
+                def _on_alloc_check_done():
+                    pipeline.finish_alloc_check()
+                    update_pipeline_display(pipeline_layout, pipeline)
+
+                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
                 pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
             except Exception as e:
                 pipeline._append_output(f"Trade plan failed: {e}")
