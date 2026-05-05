@@ -120,6 +120,7 @@ tradingagents batch LMT RTX XOM GEO PLTR -s mean
 | `--merge-only` | | `false` | Skip analysis; merge existing reports |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
 | `--merge-checks` | | `0` | Validation passes on the merge report |
+| `--continuity` | | `none` | Report continuity: `none`, `anchored`, `reconcile` |
 | `--portfolio` | | | CSV file with holdings (E\*Trade or generic) |
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
@@ -287,6 +288,39 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo`, `mean` |
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 | `--no-stop-loss` | | `false` | Disable position drawdown guidance in merge/allocation prompts |
+| `--continuity` | | `none` | Report continuity: `none`, `anchored`, `reconcile` |
+
+---
+
+## Report Continuity
+
+By default each run is independent — the LLM does not see previous reports. The `--continuity` flag enables cross-run consistency:
+
+### `--continuity anchored`
+
+The previous per-ticker report (most recent from a different date) is injected into the Portfolio Manager prompt. The PM must explicitly justify any rating change relative to the prior analysis. Prevents silent reversals due to LLM randomness.
+
+```bash
+# Re-analyze but anchor against yesterday's reports
+tradingagents batch AAPL NVDA MSFT --continuity anchored
+
+# Paper trading with anchored continuity
+tradingagents paper --continuity anchored
+```
+
+### `--continuity reconcile`
+
+Per-ticker analysis runs freely (no anchoring bias), then after the merge report is generated, a reconciliation pass compares the new merge to the previous one. It identifies each rating change, determines whether new evidence justifies it, and reverts unjustified changes. Adds a "Changes from Prior Analysis" section to the final report.
+
+```bash
+# Generate fresh analysis, then reconcile merge against previous
+tradingagents batch AAPL NVDA MSFT --continuity reconcile
+
+# Combine with validation passes
+tradingagents paper --continuity reconcile --merge-checks 1
+```
+
+Both modes require a previous report to exist in the output directory. If no prior report is found, the run proceeds normally without continuity enforcement.
 
 ---
 

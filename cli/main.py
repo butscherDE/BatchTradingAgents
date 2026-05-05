@@ -1017,6 +1017,7 @@ def _run_single_ticker(
     graph,
     output_dir=None,
     pipeline_status=None,
+    past_context="",
 ):
     stats_handler = StatsCallbackHandler()
 
@@ -1104,7 +1105,7 @@ def _run_single_ticker(
         spinner_text = f"Analyzing {ticker} on {analysis_date}..."
         _update(spinner_text, stats_handler=stats_handler, start_time=start_time)
 
-        init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date)
+        init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date, past_context=past_context)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
 
         trace = []
@@ -1640,6 +1641,10 @@ def batch(
         0, "--merge-checks",
         help="Number of validation passes on the merge report",
     ),
+    continuity: str = typer.Option(
+        "none", "--continuity",
+        help="Report continuity mode: none, anchored (feed previous report into analysis), reconcile (compare new merge to previous and correct unjustified changes)",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     from cli.portfolio import load_portfolio
@@ -1790,6 +1795,14 @@ def batch(
                     continue
 
             try:
+                anchor_ctx = ""
+                if continuity.lower() in ("anchored", "reconcile"):
+                    from cli.continuity import build_anchor_context
+                    prev_dir = _find_latest_report_dir(output_dir, ticker)
+                    if prev_dir and prev_dir != ticker_output:
+                        prev_state = _load_report_from_disk(prev_dir)
+                        anchor_ctx = build_anchor_context(prev_state.get("final_trade_decision", ""), ticker)
+
                 result = _run_single_ticker(
                     ticker=ticker,
                     analysis_date=analysis_date,
@@ -1798,6 +1811,7 @@ def batch(
                     graph=graph,
                     output_dir=ticker_output,
                     pipeline_status=pipeline,
+                    past_context=anchor_ctx,
                 )
                 results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
                 completed_states.append((ticker, result["decision"], result["final_state"]))
@@ -1817,6 +1831,15 @@ def batch(
             for i in range(merge_checks):
                 console.print(f"[cyan]Merge validation pass {i + 1}/{merge_checks}...[/cyan]")
                 report = _validate_merge_report(report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
+            if continuity.lower() == "reconcile":
+                prev_merge_path = Path(output_dir) / "_comparison" / "merge_report.md"
+                if prev_merge_path.is_file():
+                    from cli.continuity import reconcile_merge_reports
+                    from tradingagents.llm_clients import create_llm_client as _create_llm
+                    console.print("[cyan]Reconciling with previous merge report...[/cyan]")
+                    _client = _create_llm(provider=config["llm_provider"], model=config["deep_think_llm"], base_url=config.get("backend_url"))
+                    prev_merge = prev_merge_path.read_text(encoding="utf-8")
+                    report = reconcile_merge_reports(_client.get_llm(), report, prev_merge, completed_states)
             report_path = _save_merge_report(report, output_dir, [t for t, _, _ in completed_states])
             console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
             console.print()
@@ -1907,6 +1930,10 @@ def paper(
     no_stop_loss: bool = typer.Option(
         False, "--no-stop-loss",
         help="Disable stop-loss guidance based on drawdown from entry price",
+    ),
+    continuity: str = typer.Option(
+        "none", "--continuity",
+        help="Report continuity mode: none, anchored, reconcile",
     ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
@@ -2073,6 +2100,14 @@ def paper(
                         continue
 
                 try:
+                    anchor_ctx = ""
+                    if continuity.lower() in ("anchored", "reconcile"):
+                        from cli.continuity import build_anchor_context
+                        prev_dir = _find_latest_report_dir(output_dir, ticker)
+                        if prev_dir and prev_dir != ticker_output:
+                            prev_state = _load_report_from_disk(prev_dir)
+                            anchor_ctx = build_anchor_context(prev_state.get("final_trade_decision", ""), ticker)
+
                     result = _run_single_ticker(
                         ticker=ticker,
                         analysis_date=analysis_date,
@@ -2081,6 +2116,7 @@ def paper(
                         graph=graph,
                         output_dir=ticker_output,
                         pipeline_status=pipeline,
+                        past_context=anchor_ctx,
                     )
                     results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
                     completed_states.append((ticker, result["decision"], result["final_state"]))
@@ -2120,6 +2156,17 @@ def paper(
                     merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
                     pipeline.finish_merge_check()
                     update_pipeline_display(pipeline_layout, pipeline)
+
+                if continuity.lower() == "reconcile":
+                    prev_merge_path = Path(output_dir) / "_comparison" / "merge_report.md"
+                    if prev_merge_path.is_file():
+                        from cli.continuity import reconcile_merge_reports
+                        from tradingagents.llm_clients import create_llm_client as _create_llm
+                        pipeline._append_output("Reconciling with previous merge report...")
+                        update_pipeline_display(pipeline_layout, pipeline)
+                        _client = _create_llm(provider=config["llm_provider"], model=config["deep_think_llm"], base_url=config.get("backend_url"))
+                        prev_merge = prev_merge_path.read_text(encoding="utf-8")
+                        merge_report = reconcile_merge_reports(_client.get_llm(), merge_report, prev_merge, completed_states)
 
                 report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
 
