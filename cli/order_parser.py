@@ -1,6 +1,12 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+_FULL_EXIT_SYNONYMS = {"exit", "liquidate", "close", "dump"}
+_SELL_SYNONYMS = {"sell", "trim", "reduce", "underweight", "decrease", "lighten"}
+_BUY_SYNONYMS = {"buy", "add", "enter", "overweight", "increase", "accumulate"}
+_HOLD_SYNONYMS = {"hold", "keep", "maintain", "neutral", "stay"}
 
 
 class TickerAllocation(BaseModel):
@@ -14,6 +20,26 @@ class TickerAllocation(BaseModel):
             "For buy: set to the desired target %."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_action(cls, data):
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("action")
+        if not isinstance(raw, str):
+            return data
+        norm = raw.strip().lower()
+        if norm in _FULL_EXIT_SYNONYMS:
+            data["action"] = "sell"
+            data["pct"] = 0.0
+        elif norm in _SELL_SYNONYMS:
+            data["action"] = "sell"
+        elif norm in _BUY_SYNONYMS:
+            data["action"] = "buy"
+        elif norm in _HOLD_SYNONYMS:
+            data["action"] = "hold"
+        return data
 
 
 class AllocationPlan(BaseModel):
