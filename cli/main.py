@@ -2056,31 +2056,48 @@ def paper(
             pipeline._append_output("Need at least 2 analyses for merge. Stopping.")
             update_pipeline_display(pipeline_layout, pipeline)
 
+        merge_report = None
+        trade_plan = None
+
+        if len(completed_states) >= 2:
+            portfolio_dict = portfolio.to_dict()
+
+            pipeline.start_merge()
+            update_pipeline_display(pipeline_layout, pipeline)
+            merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
+            pipeline.finish_merge()
+            update_pipeline_display(pipeline_layout, pipeline)
+
+            for i in range(merge_checks):
+                pipeline.start_merge_check(i + 1, merge_checks)
+                update_pipeline_display(pipeline_layout, pipeline)
+                merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
+                pipeline.finish_merge_check()
+                update_pipeline_display(pipeline_layout, pipeline)
+
+            report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
+
+            pipeline.start_allocation()
+            update_pipeline_display(pipeline_layout, pipeline)
+            try:
+                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks)
+                pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
+            except Exception as e:
+                pipeline._append_output(f"Trade plan failed: {e}")
+            update_pipeline_display(pipeline_layout, pipeline)
+
+    # --- Dashboard closed, print final outputs ---
+
     if len(completed_states) < 2:
         console.print("[yellow]Need at least 2 successful analyses for a merge report. Skipping trade execution.[/yellow]")
         return
 
-    _print_batch_summary(results, output_dir)
-
-    portfolio_dict = portfolio.to_dict()
-
-    console.print("\n[bold cyan]Generating cross-ticker comparison report...[/bold cyan]")
-    merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
-
-    for i in range(merge_checks):
-        console.print(f"[cyan]Merge validation pass {i + 1}/{merge_checks}...[/cyan]")
-        merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
-
-    report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
     console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
     console.print()
     console.print(Panel(Markdown(merge_report), title="Cross-Ticker Comparison", border_style="green"))
 
-    console.print("\n[bold cyan]Generating trade plan...[/bold cyan]")
-    try:
-        trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks)
-    except Exception as e:
-        console.print(f"[red]Trade plan generation failed: {e}[/red]")
+    if trade_plan is None:
+        console.print("[red]Trade plan generation failed.[/red]")
         return
 
     if not trade_plan.orders:
