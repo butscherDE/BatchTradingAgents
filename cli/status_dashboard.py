@@ -112,14 +112,13 @@ def extract_report_summary(final_trade_decision: str, ticker: str, decision: str
                 break
             if stripped:
                 summary_lines.append(stripped)
-            if len(summary_lines) >= 6:
-                break
 
     header = f"{ticker} — {decision}"
-    if summary_lines:
-        body = "\n".join(summary_lines[:8])
-        return f"{header}\n{body}"
-    return header
+    if not summary_lines:
+        return header
+
+    body = " ".join(summary_lines)
+    return f"{header}\n{body}"
 
 
 def create_pipeline_layout():
@@ -216,28 +215,50 @@ def update_pipeline_display(layout: Layout, status: PipelineStatus):
         Panel(status_content, title="Pipeline Status", border_style="cyan", padding=(0, 2))
     )
 
-    console_height = Console().height or 24
-    available_lines = max(5, console_height - 6 - 4)
+    # Show complete report entries only — never truncate mid-entry.
+    # Calculate how many lines each entry takes when word-wrapped to terminal width.
+    try:
+        term_width = Console().width or 120
+    except Exception:
+        term_width = 120
+    # Account for panel border (2) + padding (4)
+    content_width = max(40, term_width - 6)
 
-    # Reserve space for active ticker indicator
-    active_suffix = ""
+    try:
+        term_height = Console().height or 30
+    except Exception:
+        term_height = 30
+    # Status panel (6 lines + 2 border) + output panel border (2) + padding (2)
+    available_lines = max(5, term_height - 12)
+
+    active_line = ""
     if status.current_ticker and status.ticker_states.get(status.current_ticker) == "active":
-        active_suffix = f"\n\n{status.current_ticker} — analyzing..."
-        available_lines -= 3
+        active_line = f"{status.current_ticker} — analyzing..."
+        available_lines -= 2  # header + blank line separator
 
-    # Build visible entries from newest, fitting as many as possible
-    visible_entries = []
+    def _wrapped_line_count(text):
+        count = 0
+        for line in text.split("\n"):
+            count += max(1, -(-len(line) // content_width))  # ceiling division
+        return count
+
+    # Pick entries from the end, fitting as many complete entries as possible
+    visible = []
     lines_used = 0
     for entry in reversed(status.output_log):
-        entry_lines = entry.count("\n") + 1
-        if lines_used + entry_lines + 1 > available_lines and visible_entries:
+        entry_lines = _wrapped_line_count(entry) + 1  # +1 for blank separator
+        if lines_used + entry_lines > available_lines and visible:
             break
-        visible_entries.append(entry)
-        lines_used += entry_lines + 1  # +1 for separator blank line
+        visible.append(entry)
+        lines_used += entry_lines
 
-    visible_entries.reverse()
-    output_text = "\n\n".join(visible_entries) if visible_entries else "Waiting..."
-    output_text += active_suffix
+    visible.reverse()
+
+    parts = list(visible)
+    if active_line:
+        parts.append(active_line)
+
+    output_text = "\n\n".join(parts) if parts else "Waiting..."
     output_content = Text(output_text)
 
     layout["output"].update(
