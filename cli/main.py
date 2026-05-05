@@ -2066,6 +2066,11 @@ def paper(
                 validate_thesis_against_news, extract_thesis_oneliner,
             )
 
+            # Tickers without any existing report must always be analyzed
+            for sym in all_tickers:
+                if not _find_latest_report_dir(output_dir, sym):
+                    tickers_to_analyze.add(sym)
+
             check_result = run_numeric_checks(
                 position_details=position_details,
                 current_prices={**position_prices, **quotes},
@@ -2103,13 +2108,13 @@ def paper(
                     if invalidated:
                         check_result.add_alert(sym, "red", f"thesis invalidated: {reason}")
 
-            # Determine flagged tickers
+            # Determine flagged tickers (union with already-flagged missing-report tickers)
             if us == "numeric":
-                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level == "red"}
+                tickers_to_analyze |= {a.symbol for a in check_result.alerts if a.level == "red"}
             elif us == "headlines":
-                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level == "red"}
+                tickers_to_analyze |= {a.symbol for a in check_result.alerts if a.level == "red"}
             elif us == "escalate":
-                tickers_to_analyze = {a.symbol for a in check_result.alerts if a.level in ("red", "yellow")}
+                tickers_to_analyze |= {a.symbol for a in check_result.alerts if a.level in ("red", "yellow")}
 
             if tickers_to_analyze:
                 pipeline._append_output(f"Health check flagged: {', '.join(sorted(tickers_to_analyze))}")
