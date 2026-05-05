@@ -2118,30 +2118,8 @@ def paper(
         # Load existing reports for tickers we won't re-analyze
         from tradingagents.agents.utils.rating import parse_rating
 
-        for ticker in all_tickers:
-            if ticker in tickers_to_analyze:
-                continue
-
-            pipeline.mark_ticker_active(ticker)
-            update_pipeline_display(pipeline_layout, pipeline)
-
-            report_dir = _find_latest_report_dir(output_dir, ticker)
-            if report_dir is None:
-                pipeline.mark_ticker_failed(ticker, "no report found")
-                update_pipeline_display(pipeline_layout, pipeline)
-                continue
-            final_state = _load_report_from_disk(report_dir)
-            if not final_state.get("final_trade_decision"):
-                pipeline.mark_ticker_failed(ticker, "no portfolio decision")
-                update_pipeline_display(pipeline_layout, pipeline)
-                continue
-            decision = parse_rating(final_state["final_trade_decision"])
-            completed_states.append((ticker, decision, final_state))
-            summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
-            pipeline.mark_ticker_reused(ticker, summary)
-            update_pipeline_display(pipeline_layout, pipeline)
-
-        # Run full analysis for tickers that need it
+        # Initialize graph only if needed
+        graph = None
         if tickers_to_analyze:
             graph = TradingAgentsGraph(
                 all_analyst_keys,
@@ -2149,54 +2127,72 @@ def paper(
                 debug=True,
             )
 
-            for ticker in all_tickers:
-                if ticker not in tickers_to_analyze:
+        # Single pass through all tickers in order (preserves dashboard scroll)
+        for ticker in all_tickers:
+            pipeline.mark_ticker_active(ticker)
+            update_pipeline_display(pipeline_layout, pipeline)
+
+            ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+            # Ticker not flagged for re-analysis — load from disk
+            if ticker not in tickers_to_analyze:
+                report_dir = _find_latest_report_dir(output_dir, ticker)
+                if report_dir is None:
+                    pipeline.mark_ticker_failed(ticker, "no report found")
+                    update_pipeline_display(pipeline_layout, pipeline)
+                    continue
+                final_state = _load_report_from_disk(report_dir)
+                if not final_state.get("final_trade_decision"):
+                    pipeline.mark_ticker_failed(ticker, "no portfolio decision")
+                    update_pipeline_display(pipeline_layout, pipeline)
+                    continue
+                decision = parse_rating(final_state["final_trade_decision"])
+                completed_states.append((ticker, decision, final_state))
+                summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
+                pipeline.mark_ticker_reused(ticker, summary)
+                update_pipeline_display(pipeline_layout, pipeline)
+                continue
+
+            # Ticker flagged — check reuse_today first
+            if reuse_today and ticker_output.is_dir():
+                existing_state = _load_report_from_disk(ticker_output)
+                if existing_state.get("final_trade_decision"):
+                    decision = parse_rating(existing_state["final_trade_decision"])
+                    results.append((ticker, "REUSED", decision, 0))
+                    completed_states.append((ticker, decision, existing_state))
+                    summary = extract_report_summary(existing_state["final_trade_decision"], ticker, decision)
+                    pipeline.mark_ticker_reused(ticker, summary)
+                    update_pipeline_display(pipeline_layout, pipeline)
                     continue
 
-                pipeline.mark_ticker_active(ticker)
-                update_pipeline_display(pipeline_layout, pipeline)
+            # Full analysis
+            try:
+                anchor_ctx = ""
+                if continuity.lower() in ("anchored", "reconcile"):
+                    from cli.continuity import build_anchor_context
+                    prev_dir = _find_latest_report_dir(output_dir, ticker)
+                    if prev_dir and prev_dir != ticker_output:
+                        prev_state = _load_report_from_disk(prev_dir)
+                        anchor_ctx = build_anchor_context(prev_state.get("final_trade_decision", ""), ticker)
 
-                ticker_output = output_dir / f"{ticker}_{analysis_date}"
-
-                if reuse_today and ticker_output.is_dir():
-                    from tradingagents.agents.utils.rating import parse_rating as _parse_rating
-                    existing_state = _load_report_from_disk(ticker_output)
-                    if existing_state.get("final_trade_decision"):
-                        decision = _parse_rating(existing_state["final_trade_decision"])
-                        results.append((ticker, "REUSED", decision, 0))
-                        completed_states.append((ticker, decision, existing_state))
-                        summary = extract_report_summary(existing_state["final_trade_decision"], ticker, decision)
-                        pipeline.mark_ticker_reused(ticker, summary)
-                        update_pipeline_display(pipeline_layout, pipeline)
-                        continue
-
-                try:
-                    anchor_ctx = ""
-                    if continuity.lower() in ("anchored", "reconcile"):
-                        from cli.continuity import build_anchor_context
-                        prev_dir = _find_latest_report_dir(output_dir, ticker)
-                        if prev_dir and prev_dir != ticker_output:
-                            prev_state = _load_report_from_disk(prev_dir)
-                            anchor_ctx = build_anchor_context(prev_state.get("final_trade_decision", ""), ticker)
-
-                    result = _run_single_ticker(
-                        ticker=ticker,
-                        analysis_date=analysis_date,
-                        selected_analyst_keys=all_analyst_keys,
-                        config=config,
-                        graph=graph,
-                        output_dir=ticker_output,
-                        pipeline_status=pipeline,
-                        past_context=anchor_ctx,
-                    )
-                    results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
-                    completed_states.append((ticker, result["decision"], result["final_state"]))
-                    summary = extract_report_summary(result["final_state"].get("final_trade_decision", ""), ticker, result["decision"])
-                    pipeline.mark_ticker_done(ticker, summary)
-                except Exception as e:
-                    results.append((ticker, "FAILED", str(e), 0))
-                    pipeline.mark_ticker_failed(ticker, str(e))
-                update_pipeline_display(pipeline_layout, pipeline)
+                result = _run_single_ticker(
+                    ticker=ticker,
+                    analysis_date=analysis_date,
+                    selected_analyst_keys=all_analyst_keys,
+                    config=config,
+                    graph=graph,
+                    output_dir=ticker_output,
+                    pipeline_status=pipeline,
+                    past_context=anchor_ctx,
+                )
+                results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+                completed_states.append((ticker, result["decision"], result["final_state"]))
+                summary = extract_report_summary(result["final_state"].get("final_trade_decision", ""), ticker, result["decision"])
+                pipeline.mark_ticker_done(ticker, summary)
+            except Exception as e:
+                results.append((ticker, "FAILED", str(e), 0))
+                pipeline.mark_ticker_failed(ticker, str(e))
+            update_pipeline_display(pipeline_layout, pipeline)
 
         do_merge_phase = reuse_merge or len(completed_states) >= 2
         if not do_merge_phase:
