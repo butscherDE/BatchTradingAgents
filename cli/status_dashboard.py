@@ -109,7 +109,7 @@ def _build_ticker_line(status: PipelineStatus, max_width: int = 100) -> Text:
     styles = {
         "done": "green",
         "reused": "cyan",
-        "active": "bold blue",
+        "active": "bold orange3",
         "failed": "red",
         "pending": "dim",
     }
