@@ -1003,6 +1003,7 @@ def _run_single_ticker(
     config,
     graph,
     output_dir=None,
+    pipeline_status=None,
 ):
     stats_handler = StatsCallbackHandler()
 
@@ -1057,10 +1058,22 @@ def _run_single_ticker(
     message_buffer.add_tool_call = save_tool_call_decorator(message_buffer, "add_tool_call")
     message_buffer.update_report_section = save_report_section_decorator(message_buffer, "update_report_section")
 
-    layout = create_layout()
+    use_internal_display = pipeline_status is None
 
-    with Live(layout, refresh_per_second=4) as live:
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+    if use_internal_display:
+        layout = create_layout()
+    else:
+        layout = None
+
+    def _update(*args, **kwargs):
+        if use_internal_display:
+            update_display(layout, *args, **kwargs)
+
+    from contextlib import nullcontext
+    live_ctx = Live(layout, refresh_per_second=4) if use_internal_display else nullcontext()
+
+    with live_ctx:
+        _update(stats_handler=stats_handler, start_time=start_time)
 
         message_buffer.add_message("System", f"Selected ticker: {ticker}")
         message_buffer.add_message("System", f"Analysis date: {analysis_date}")
@@ -1068,15 +1081,15 @@ def _run_single_ticker(
             "System",
             f"Selected analysts: {', '.join(selected_analyst_keys)}",
         )
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        _update(stats_handler=stats_handler, start_time=start_time)
 
         first_analyst_key = selected_analyst_keys[0]
         first_analyst = f"{first_analyst_key.capitalize()} Analyst"
         message_buffer.update_agent_status(first_analyst, "in_progress")
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        _update(stats_handler=stats_handler, start_time=start_time)
 
         spinner_text = f"Analyzing {ticker} on {analysis_date}..."
-        update_display(layout, spinner_text, stats_handler=stats_handler, start_time=start_time)
+        _update(spinner_text, stats_handler=stats_handler, start_time=start_time)
 
         init_agent_state = graph.propagator.create_initial_state(ticker, analysis_date)
         args = graph.propagator.get_graph_args(callbacks=[stats_handler])
@@ -1170,7 +1183,7 @@ def _run_single_ticker(
                         message_buffer.update_agent_status("Neutral Analyst", "completed")
                         message_buffer.update_agent_status("Portfolio Manager", "completed")
 
-            update_display(layout, stats_handler=stats_handler, start_time=start_time)
+            _update(stats_handler=stats_handler, start_time=start_time)
 
             trace.append(chunk)
 
@@ -1186,7 +1199,7 @@ def _run_single_ticker(
             if section in final_state:
                 message_buffer.update_report_section(section, final_state[section])
 
-        update_display(layout, stats_handler=stats_handler, start_time=start_time)
+        _update(stats_handler=stats_handler, start_time=start_time)
 
     elapsed = time.time() - start_time
 
@@ -1717,6 +1730,20 @@ def batch(
         )
     console.print(Panel("\n".join(batch_panel_lines), border_style="green"))
 
+    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display
+    from rich.live import Live as PipelineLive
+
+    pipeline = PipelineStatus(
+        tickers=list(tickers),
+        ticker_states={t: "pending" for t in tickers},
+        total_tickers=len(tickers),
+        merge_total=1 + merge_checks if not no_merge else 0,
+        alloc_total=0,
+        show_allocation=False,
+    )
+
+    pipeline_layout = create_pipeline_layout()
+
     graph = TradingAgentsGraph(
         all_analyst_keys,
         config=config,
@@ -1726,38 +1753,43 @@ def batch(
     results = []
     completed_states = []
 
-    for i, ticker in enumerate(tickers, 1):
-        console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
-        console.print(f"[bold cyan]Ticker {i}/{len(tickers)}: {ticker}[/bold cyan]")
-        console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
+    with PipelineLive(pipeline_layout, refresh_per_second=4, console=console):
+        update_pipeline_display(pipeline_layout, pipeline)
 
-        ticker_output = output_dir / f"{ticker}_{analysis_date}"
+        for i, ticker in enumerate(tickers, 1):
+            pipeline.mark_ticker_active(ticker)
+            update_pipeline_display(pipeline_layout, pipeline)
 
-        if reuse_today and ticker_output.is_dir():
-            from tradingagents.agents.utils.rating import parse_rating as _parse_rating
-            existing_state = _load_report_from_disk(ticker_output)
-            if existing_state.get("final_trade_decision"):
-                decision = _parse_rating(existing_state["final_trade_decision"])
-                results.append((ticker, "REUSED", decision, 0))
-                completed_states.append((ticker, decision, existing_state))
-                console.print(f"[cyan]Reused today's report for {ticker} — {decision}[/cyan]")
-                continue
+            ticker_output = output_dir / f"{ticker}_{analysis_date}"
 
-        try:
-            result = _run_single_ticker(
-                ticker=ticker,
-                analysis_date=analysis_date,
-                selected_analyst_keys=all_analyst_keys,
-                config=config,
-                graph=graph,
-                output_dir=ticker_output,
-            )
-            results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
-            completed_states.append((ticker, result["decision"], result["final_state"]))
-            console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
-        except Exception as e:
-            results.append((ticker, "FAILED", str(e), 0))
-            console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+            if reuse_today and ticker_output.is_dir():
+                from tradingagents.agents.utils.rating import parse_rating as _parse_rating
+                existing_state = _load_report_from_disk(ticker_output)
+                if existing_state.get("final_trade_decision"):
+                    decision = _parse_rating(existing_state["final_trade_decision"])
+                    results.append((ticker, "REUSED", decision, 0))
+                    completed_states.append((ticker, decision, existing_state))
+                    pipeline.mark_ticker_reused(ticker, decision)
+                    update_pipeline_display(pipeline_layout, pipeline)
+                    continue
+
+            try:
+                result = _run_single_ticker(
+                    ticker=ticker,
+                    analysis_date=analysis_date,
+                    selected_analyst_keys=all_analyst_keys,
+                    config=config,
+                    graph=graph,
+                    output_dir=ticker_output,
+                    pipeline_status=pipeline,
+                )
+                results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+                completed_states.append((ticker, result["decision"], result["final_state"]))
+                pipeline.mark_ticker_done(ticker, result["decision"])
+            except Exception as e:
+                results.append((ticker, "FAILED", str(e), 0))
+                pipeline.mark_ticker_failed(ticker, str(e))
+            update_pipeline_display(pipeline_layout, pipeline)
 
     _print_batch_summary(results, output_dir)
 
@@ -1934,84 +1966,98 @@ def paper(
     else:
         tax_portfolio_summaries = {}
 
-    console.print(Panel(
-        f"[bold]Analysis Plan[/bold]\n"
-        f"Tickers: {', '.join(all_tickers)}\n"
-        f"Date: {analysis_date} | Depth: {depth} | Provider: {provider}\n"
-        f"Models: {quick_model} (quick) / {deep_model} (deep)"
-        + ("\n[yellow]Skip-analysis: using existing reports[/yellow]" if skip_analysis else "")
-        + ("\n[yellow]Dry-run: orders will NOT be submitted[/yellow]" if dry_run else ""),
-        border_style="cyan",
-    ))
+    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display
+    from rich.live import Live as PipelineLive
+
+    pipeline = PipelineStatus(
+        tickers=list(all_tickers),
+        ticker_states={t: "pending" for t in all_tickers},
+        total_tickers=len(all_tickers),
+        merge_total=1 + merge_checks,
+        alloc_total=1 + allocation_checks,
+        show_allocation=True,
+    )
+
+    pipeline_layout = create_pipeline_layout()
 
     results = []
     completed_states = []
 
-    if skip_analysis:
-        from tradingagents.agents.utils.rating import parse_rating
+    with PipelineLive(pipeline_layout, refresh_per_second=4, console=console):
+        update_pipeline_display(pipeline_layout, pipeline)
 
-        missing = []
-        for ticker in all_tickers:
-            report_dir = _find_latest_report_dir(output_dir, ticker)
-            if report_dir is None:
-                missing.append(ticker)
-                continue
-            final_state = _load_report_from_disk(report_dir)
-            if not final_state.get("final_trade_decision"):
-                missing.append(ticker)
-                console.print(f"[yellow]{ticker}: report in {report_dir.name} has no portfolio decision — skipping[/yellow]")
-                continue
-            decision = parse_rating(final_state["final_trade_decision"])
-            completed_states.append((ticker, decision, final_state))
-            console.print(f"[green]Loaded {ticker} from {report_dir.name} — {decision}[/green]")
+        if skip_analysis:
+            from tradingagents.agents.utils.rating import parse_rating
 
-        if missing:
-            console.print(f"[yellow]No reports found for: {', '.join(missing)}[/yellow]")
-    else:
-        graph = TradingAgentsGraph(
-            all_analyst_keys,
-            config=config,
-            debug=True,
-        )
+            for ticker in all_tickers:
+                pipeline.mark_ticker_active(ticker)
+                update_pipeline_display(pipeline_layout, pipeline)
 
-        for i, ticker in enumerate(all_tickers, 1):
-            console.print(f"\n[bold cyan]{'=' * 60}[/bold cyan]")
-            console.print(f"[bold cyan]Ticker {i}/{len(all_tickers)}: {ticker}[/bold cyan]")
-            console.print(f"[bold cyan]{'=' * 60}[/bold cyan]\n")
-
-            ticker_output = output_dir / f"{ticker}_{analysis_date}"
-
-            if reuse_today and ticker_output.is_dir():
-                from tradingagents.agents.utils.rating import parse_rating as _parse_rating
-                existing_state = _load_report_from_disk(ticker_output)
-                if existing_state.get("final_trade_decision"):
-                    decision = _parse_rating(existing_state["final_trade_decision"])
-                    results.append((ticker, "REUSED", decision, 0))
-                    completed_states.append((ticker, decision, existing_state))
-                    console.print(f"[cyan]Reused today's report for {ticker} — {decision}[/cyan]")
+                report_dir = _find_latest_report_dir(output_dir, ticker)
+                if report_dir is None:
+                    pipeline.mark_ticker_failed(ticker, "no report found")
+                    update_pipeline_display(pipeline_layout, pipeline)
                     continue
+                final_state = _load_report_from_disk(report_dir)
+                if not final_state.get("final_trade_decision"):
+                    pipeline.mark_ticker_failed(ticker, "no portfolio decision")
+                    update_pipeline_display(pipeline_layout, pipeline)
+                    continue
+                decision = parse_rating(final_state["final_trade_decision"])
+                completed_states.append((ticker, decision, final_state))
+                pipeline.mark_ticker_reused(ticker, decision)
+                update_pipeline_display(pipeline_layout, pipeline)
+        else:
+            graph = TradingAgentsGraph(
+                all_analyst_keys,
+                config=config,
+                debug=True,
+            )
 
-            try:
-                result = _run_single_ticker(
-                    ticker=ticker,
-                    analysis_date=analysis_date,
-                    selected_analyst_keys=all_analyst_keys,
-                    config=config,
-                    graph=graph,
-                    output_dir=ticker_output,
-                )
-                results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
-                completed_states.append((ticker, result["decision"], result["final_state"]))
-                console.print(f"\n[green]Completed {ticker} in {result['elapsed']:.0f}s[/green]")
-            except Exception as e:
-                results.append((ticker, "FAILED", str(e), 0))
-                console.print(f"\n[red]Failed {ticker}: {e}[/red]")
+            for i, ticker in enumerate(all_tickers, 1):
+                pipeline.mark_ticker_active(ticker)
+                update_pipeline_display(pipeline_layout, pipeline)
 
-        _print_batch_summary(results, output_dir)
+                ticker_output = output_dir / f"{ticker}_{analysis_date}"
+
+                if reuse_today and ticker_output.is_dir():
+                    from tradingagents.agents.utils.rating import parse_rating as _parse_rating
+                    existing_state = _load_report_from_disk(ticker_output)
+                    if existing_state.get("final_trade_decision"):
+                        decision = _parse_rating(existing_state["final_trade_decision"])
+                        results.append((ticker, "REUSED", decision, 0))
+                        completed_states.append((ticker, decision, existing_state))
+                        pipeline.mark_ticker_reused(ticker, decision)
+                        update_pipeline_display(pipeline_layout, pipeline)
+                        continue
+
+                try:
+                    result = _run_single_ticker(
+                        ticker=ticker,
+                        analysis_date=analysis_date,
+                        selected_analyst_keys=all_analyst_keys,
+                        config=config,
+                        graph=graph,
+                        output_dir=ticker_output,
+                        pipeline_status=pipeline,
+                    )
+                    results.append((ticker, "SUCCESS", result["decision"], result["elapsed"]))
+                    completed_states.append((ticker, result["decision"], result["final_state"]))
+                    pipeline.mark_ticker_done(ticker, result["decision"])
+                except Exception as e:
+                    results.append((ticker, "FAILED", str(e), 0))
+                    pipeline.mark_ticker_failed(ticker, str(e))
+                update_pipeline_display(pipeline_layout, pipeline)
+
+        if len(completed_states) < 2:
+            pipeline.current_output = "Need at least 2 analyses for merge. Stopping."
+            update_pipeline_display(pipeline_layout, pipeline)
 
     if len(completed_states) < 2:
         console.print("[yellow]Need at least 2 successful analyses for a merge report. Skipping trade execution.[/yellow]")
         return
+
+    _print_batch_summary(results, output_dir)
 
     portfolio_dict = portfolio.to_dict()
 
