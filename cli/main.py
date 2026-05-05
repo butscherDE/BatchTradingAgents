@@ -2066,10 +2066,15 @@ def paper(
                 validate_thesis_against_news, extract_thesis_oneliner,
             )
 
-            # Tickers without any existing report must always be analyzed
+            # Tickers without a usable existing report must always be analyzed
             for sym in all_tickers:
-                if not _find_latest_report_dir(output_dir, sym):
+                report_dir = _find_latest_report_dir(output_dir, sym)
+                if not report_dir:
                     tickers_to_analyze.add(sym)
+                else:
+                    state = _load_report_from_disk(report_dir)
+                    if not state.get("final_trade_decision"):
+                        tickers_to_analyze.add(sym)
 
             check_result = run_numeric_checks(
                 position_details=position_details,
