@@ -2175,42 +2175,80 @@ def paper(
     projected_holdings = {s: q for s, q in projected_holdings.items() if q > 0}
 
     proj_table = Table(
-        title="Projected Portfolio (after pending + new orders)",
+        title="Portfolio: Current vs Projected (after pending + new orders)",
         show_header=True,
         header_style="bold magenta",
         box=box.ROUNDED,
     )
     proj_table.add_column("Symbol", style="cyan", justify="center")
-    proj_table.add_column("Qty", justify="right")
-    proj_table.add_column("%", justify="right")
     proj_table.add_column("Price", justify="right")
-    proj_table.add_column("Value", justify="right")
+    proj_table.add_column("Qty (cur)", justify="right")
+    proj_table.add_column("Qty (new)", justify="right")
+    proj_table.add_column("Value (cur)", justify="right")
+    proj_table.add_column("Value (new)", justify="right")
+    proj_table.add_column("% (cur)", justify="right")
+    proj_table.add_column("% (new)", justify="right")
+
+    union_symbols = set(portfolio.holdings) | set(projected_holdings)
 
     rows = []
-    total_value = 0.0
-    for sym in sorted(projected_holdings):
-        qty = projected_holdings[sym]
+    cur_total_value = 0.0
+    new_total_value = 0.0
+    for sym in sorted(union_symbols):
+        cur_qty = portfolio.holdings.get(sym, 0)
+        new_qty = projected_holdings.get(sym, 0)
         price = all_prices.get(sym)
         if price is not None:
-            val = qty * price
-            total_value += val
-            rows.append((sym, qty, price, val))
+            cur_val = cur_qty * price
+            new_val = new_qty * price
+            cur_total_value += cur_val
+            new_total_value += new_val
         else:
-            rows.append((sym, qty, None, None))
+            cur_val = None
+            new_val = None
+        rows.append((sym, cur_qty, new_qty, price, cur_val, new_val))
 
-    grand_total = total_value + projected_cash
+    cur_grand_total = cur_total_value + portfolio.cash
+    new_grand_total = new_total_value + projected_cash
 
-    for sym, qty, price, val in rows:
-        if val is not None:
-            pct = (val / grand_total * 100) if grand_total > 0 else 0
-            proj_table.add_row(sym, f"{qty:,.2f}", f"{pct:.1f}%", f"${price:,.2f}", f"${val:,.2f}")
+    for sym, cur_qty, new_qty, price, cur_val, new_val in rows:
+        if cur_val is not None:
+            cur_pct = (cur_val / cur_grand_total * 100) if cur_grand_total > 0 else 0
+            new_pct = (new_val / new_grand_total * 100) if new_grand_total > 0 else 0
+            row_style = "dim" if cur_qty == new_qty else None
+            proj_table.add_row(
+                sym,
+                f"${price:,.2f}",
+                f"{cur_qty:,.2f}",
+                f"{new_qty:,.2f}",
+                f"${cur_val:,.2f}",
+                f"${new_val:,.2f}",
+                f"{cur_pct:.1f}%",
+                f"{new_pct:.1f}%",
+                style=row_style,
+            )
         else:
-            proj_table.add_row(sym, f"{qty:,.2f}", "—", "—", "—")
+            proj_table.add_row(
+                sym, "—",
+                f"{cur_qty:,.2f}", f"{new_qty:,.2f}",
+                "—", "—", "—", "—",
+            )
 
-    cash_pct = (projected_cash / grand_total * 100) if grand_total > 0 else 0
-    proj_table.add_row("", "", "", "", "─" * 12, style="dim")
-    proj_table.add_row("CASH", "", f"{cash_pct:.1f}%", "", f"${projected_cash:,.2f}", style="bold")
-    proj_table.add_row("TOTAL", "", "100%", "", f"${grand_total:,.2f}", style="bold green")
+    cur_cash_pct = (portfolio.cash / cur_grand_total * 100) if cur_grand_total > 0 else 0
+    new_cash_pct = (projected_cash / new_grand_total * 100) if new_grand_total > 0 else 0
+    proj_table.add_row("", "", "", "", "─" * 12, "─" * 12, "", "", style="dim")
+    proj_table.add_row(
+        "CASH", "", "", "",
+        f"${portfolio.cash:,.2f}", f"${projected_cash:,.2f}",
+        f"{cur_cash_pct:.1f}%", f"{new_cash_pct:.1f}%",
+        style="bold",
+    )
+    proj_table.add_row(
+        "TOTAL", "", "", "",
+        f"${cur_grand_total:,.2f}", f"${new_grand_total:,.2f}",
+        "100%", "100%",
+        style="bold green",
+    )
     console.print(proj_table)
 
     if dry_run:
