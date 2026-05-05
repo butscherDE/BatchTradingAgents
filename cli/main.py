@@ -1319,7 +1319,7 @@ def _build_ticker_section(ticker, decision, final_state, include_analyst_reports
     return "\n\n".join(parts)
 
 
-def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None, tax_summaries=None):
+def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None, tax_summaries=None, risk_context=""):
     from tradingagents.llm_clients import create_llm_client
 
     llm_kwargs = {}
@@ -1381,6 +1381,8 @@ def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None
     if strategy:
         strategy_instruction = f"**Investment Strategy:** {strategy}\nApply this risk profile when ranking tickers and recommending capital allocation.\n"
 
+    risk_context_block = f"{risk_context}\n" if risk_context else ""
+
     report_type = "full analysis reports" if include_analyst_reports else "Portfolio Manager decisions"
 
     prompt = f"""You are a Chief Investment Officer. You have received {report_type} for {len(ticker_results)} tickers. Each ticker was analyzed by a team of market, sentiment, news, and fundamentals analysts, followed by research debate, trading, and risk management — culminating in a Portfolio Manager decision.
@@ -1399,7 +1401,7 @@ def _generate_merge_report(ticker_results, config, portfolio=None, strategy=None
 ---
 
 {portfolio_context}
-{strategy_instruction}
+{risk_context_block}{strategy_instruction}
 Produce a report with these sections:
 
 ### 1. Cross-Ticker Dependencies and Contradictions
@@ -1889,6 +1891,10 @@ def paper(
         False, "--reuse-merge",
         help="Skip merge report generation; reuse the last saved merge report. Fails if none exists.",
     ),
+    no_stop_loss: bool = typer.Option(
+        False, "--no-stop-loss",
+        help="Disable stop-loss guidance based on drawdown from entry price",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1897,6 +1903,7 @@ def paper(
     )
     from cli.order_parser import parse_orders, format_pending_orders
     from cli.tax import compute_tax_context, format_tax_context_for_prompt, format_tax_context_for_portfolio
+    from cli.position_risk import format_position_risk_context
 
     reused_merge_path = output_dir / "_comparison" / "merge_report.md"
     if reuse_merge and not reused_merge_path.is_file():
@@ -1979,6 +1986,10 @@ def paper(
         tax_portfolio_summaries = format_tax_context_for_portfolio(tax_ctx, position_details)
     else:
         tax_portfolio_summaries = {}
+
+    risk_context_str = ""
+    if not no_stop_loss and position_details:
+        risk_context_str = format_position_risk_context(position_details, all_prices, strategy=strategy.lower())
 
     from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_summary
     from rich.live import Live as PipelineLive
@@ -2085,7 +2096,7 @@ def paper(
                 report_path = reused_merge_path
                 pipeline._append_output(f"Reusing merge report at {reused_merge_path}")
             else:
-                merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
+                merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries, risk_context=risk_context_str)
             pipeline.finish_merge()
             update_pipeline_display(pipeline_layout, pipeline)
 
@@ -2102,7 +2113,7 @@ def paper(
             pipeline.start_allocation()
             update_pipeline_display(pipeline_layout, pipeline)
             try:
-                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks)
+                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str)
                 pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
             except Exception as e:
                 pipeline._append_output(f"Trade plan failed: {e}")
