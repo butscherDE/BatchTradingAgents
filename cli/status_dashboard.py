@@ -25,12 +25,15 @@ class PipelineStatus:
 
     current_phase: str = "ticker"
     current_ticker: str | None = None
-    current_output: str = ""
+    output_log: list[str] = field(default_factory=list)
 
     step_start: float = field(default_factory=time.time)
     total_start: float = field(default_factory=time.time)
 
     show_allocation: bool = True
+
+    def _append_output(self, line: str):
+        self.output_log.append(line)
 
     def mark_ticker_active(self, ticker):
         self.current_phase = "ticker"
@@ -42,23 +45,23 @@ class PipelineStatus:
         self.ticker_states[ticker] = "done"
         self.completed_tickers += 1
         if decision:
-            self.current_output = f"{ticker} — {decision}"
+            self._append_output(decision)
 
     def mark_ticker_reused(self, ticker, decision=""):
         self.ticker_states[ticker] = "reused"
         self.completed_tickers += 1
         if decision:
-            self.current_output = f"{ticker} — {decision} (reused)"
+            self._append_output(decision)
 
     def mark_ticker_failed(self, ticker, error=""):
         self.ticker_states[ticker] = "failed"
-        self.current_output = f"{ticker} — FAILED: {error[:80]}"
+        self._append_output(f"{ticker} — FAILED: {error[:80]}")
 
     def start_merge(self):
         self.current_phase = "merge"
         self.current_ticker = None
         self.step_start = time.time()
-        self.current_output = "Generating cross-ticker comparison..."
+        self._append_output("Generating cross-ticker comparison...")
 
     def finish_merge(self):
         self.merge_completed += 1
@@ -66,7 +69,7 @@ class PipelineStatus:
     def start_merge_check(self, i, total):
         self.current_phase = "merge_check"
         self.step_start = time.time()
-        self.current_output = f"Validating merge report (pass {i}/{total})..."
+        self._append_output(f"Validating merge report (pass {i}/{total})...")
 
     def finish_merge_check(self):
         self.merge_completed += 1
@@ -74,32 +77,45 @@ class PipelineStatus:
     def start_allocation(self):
         self.current_phase = "allocation"
         self.step_start = time.time()
-        self.current_output = "Generating allocation plan..."
+        self._append_output("Generating allocation plan...")
 
     def finish_allocation(self, reasoning=""):
         self.alloc_completed += 1
         if reasoning:
-            self.current_output = f"Allocation: {reasoning[:120]}"
+            self._append_output(f"Allocation: {reasoning[:120]}")
 
     def start_alloc_check(self, i, total):
         self.current_phase = "alloc_check"
         self.step_start = time.time()
-        self.current_output = f"Validating allocation (pass {i}/{total})..."
+        self._append_output(f"Validating allocation (pass {i}/{total})...")
 
     def finish_alloc_check(self):
         self.alloc_completed += 1
 
 
-def extract_report_oneliner(final_trade_decision: str, ticker: str, decision: str) -> str:
-    for line in final_trade_decision.splitlines():
+def extract_report_summary(final_trade_decision: str, ticker: str, decision: str) -> str:
+    lines = final_trade_decision.splitlines()
+    summary_lines = []
+    capturing = False
+    for line in lines:
         stripped = line.strip()
-        if stripped.lower().startswith("**executive summary**:") or stripped.lower().startswith("**executive summary:**"):
-            summary = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
-            first_sentence = summary.split(". ")[0]
-            if first_sentence:
-                return f"{ticker} — {decision}: {first_sentence}."
-            break
-    return f"{ticker} — {decision}"
+        if stripped.lower().startswith("**executive summary**"):
+            content = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
+            if content:
+                summary_lines.append(content)
+            capturing = True
+            continue
+        if capturing:
+            if stripped.startswith("**") and not stripped.startswith("**Executive"):
+                break
+            if stripped:
+                summary_lines.append(stripped)
+
+    header = f"{ticker} — {decision}"
+    if summary_lines:
+        body = "\n".join(summary_lines[:8])
+        return f"{header}\n{body}"
+    return header
 
 
 def create_pipeline_layout():
@@ -196,12 +212,23 @@ def update_pipeline_display(layout: Layout, status: PipelineStatus):
         Panel(status_content, title="Pipeline Status", border_style="cyan", padding=(0, 2))
     )
 
-    output_text = status.current_output or "Waiting..."
-    if status.current_phase in ("merge", "merge_check", "allocation", "alloc_check") and status.current_output.endswith("..."):
-        output_content = Text(output_text)
-    else:
-        output_content = Text(output_text)
+    console_height = Console().height or 24
+    available_lines = max(5, console_height - 6 - 4)
+
+    # Build visible entries from newest, fitting as many as possible
+    visible_entries = []
+    lines_used = 0
+    for entry in reversed(status.output_log):
+        entry_lines = entry.count("\n") + 1
+        if lines_used + entry_lines + 1 > available_lines and visible_entries:
+            break
+        visible_entries.append(entry)
+        lines_used += entry_lines + 1  # +1 for separator blank line
+
+    visible_entries.reverse()
+    output_text = "\n\n".join(visible_entries) if visible_entries else "Waiting..."
+    output_content = Text(output_text)
 
     layout["output"].update(
-        Panel(output_content, title="Current Output", border_style="green", padding=(0, 2))
+        Panel(output_content, title="Output", border_style="green", padding=(0, 2))
     )

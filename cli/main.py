@@ -1730,7 +1730,7 @@ def batch(
         )
     console.print(Panel("\n".join(batch_panel_lines), border_style="green"))
 
-    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_oneliner
+    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_summary
     from rich.live import Live as PipelineLive
 
     pipeline = PipelineStatus(
@@ -1769,8 +1769,8 @@ def batch(
                     decision = _parse_rating(existing_state["final_trade_decision"])
                     results.append((ticker, "REUSED", decision, 0))
                     completed_states.append((ticker, decision, existing_state))
-                    oneliner = extract_report_oneliner(existing_state["final_trade_decision"], ticker, decision)
-                    pipeline.mark_ticker_reused(ticker, oneliner)
+                    summary = extract_report_summary(existing_state["final_trade_decision"], ticker, decision)
+                    pipeline.mark_ticker_reused(ticker, summary)
                     update_pipeline_display(pipeline_layout, pipeline)
                     continue
 
@@ -1967,7 +1967,7 @@ def paper(
     else:
         tax_portfolio_summaries = {}
 
-    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_oneliner
+    from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_summary
     from rich.live import Live as PipelineLive
 
     pipeline = PipelineStatus(
@@ -2006,8 +2006,8 @@ def paper(
                     continue
                 decision = parse_rating(final_state["final_trade_decision"])
                 completed_states.append((ticker, decision, final_state))
-                oneliner = extract_report_oneliner(final_state["final_trade_decision"], ticker, decision)
-                pipeline.mark_ticker_reused(ticker, oneliner)
+                summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
+                pipeline.mark_ticker_reused(ticker, summary)
                 update_pipeline_display(pipeline_layout, pipeline)
         else:
             graph = TradingAgentsGraph(
@@ -2029,8 +2029,8 @@ def paper(
                         decision = _parse_rating(existing_state["final_trade_decision"])
                         results.append((ticker, "REUSED", decision, 0))
                         completed_states.append((ticker, decision, existing_state))
-                        oneliner = extract_report_oneliner(existing_state["final_trade_decision"], ticker, decision)
-                        pipeline.mark_ticker_reused(ticker, oneliner)
+                        summary = extract_report_summary(existing_state["final_trade_decision"], ticker, decision)
+                        pipeline.mark_ticker_reused(ticker, summary)
                         update_pipeline_display(pipeline_layout, pipeline)
                         continue
 
@@ -2053,7 +2053,7 @@ def paper(
                 update_pipeline_display(pipeline_layout, pipeline)
 
         if len(completed_states) < 2:
-            pipeline.current_output = "Need at least 2 analyses for merge. Stopping."
+            pipeline._append_output("Need at least 2 analyses for merge. Stopping.")
             update_pipeline_display(pipeline_layout, pipeline)
 
     if len(completed_states) < 2:
