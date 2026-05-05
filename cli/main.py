@@ -2388,5 +2388,219 @@ def paper(
     console.print(f"\n[green]Trade log saved to:[/green] {trade_log.resolve()}")
 
 
+@app.command()
+def check(
+    tickers: Optional[list[str]] = typer.Argument(
+        None, help="Tickers to check (defaults to portfolio holdings)",
+    ),
+    key: Optional[str] = typer.Option(
+        None, "--key",
+        help="Alpaca API key (or set ALPACA_API_KEY env var)",
+    ),
+    secret: Optional[str] = typer.Option(
+        None, "--secret",
+        help="Alpaca API secret (or set ALPACA_API_SECRET env var)",
+    ),
+    live: bool = typer.Option(
+        False, "--live",
+        help="Use live trading account (default: paper)",
+    ),
+    output_dir: Path = typer.Option(
+        Path("./reports"), "--output-dir", "-o",
+        help="Directory with existing reports",
+    ),
+    strategy: str = typer.Option(
+        "balanced", "--strategy", "-s",
+        help="Strategy for stop-loss thresholds: conservative, balanced, aggressive, yolo, mean",
+    ),
+    update_strategy: str = typer.Option(
+        "numeric", "--update-strategy", "-t",
+        help="Check depth: numeric (prices only), headlines (+ news validation), escalate (+ re-analyze flagged), full (re-analyze all + merge)",
+    ),
+    provider: str = typer.Option(
+        "ollama", "--provider", "-p",
+        help="LLM provider (for headlines/escalate/full)",
+    ),
+    quick_model: str = typer.Option(
+        "qwen3:8b", "--quick-model",
+        help="Model for headline validation",
+    ),
+    deep_model: str = typer.Option(
+        "qwen3:32b", "--deep-model",
+        help="Model for escalated re-analysis",
+    ),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q",
+        help="Minimal output; exit code 0=clear, 1=alerts",
+    ),
+):
+    """Lightweight portfolio health check without full analysis."""
+    from cli.alpaca_client import create_client, fetch_portfolio, resolve_credentials
+    from cli.check import (
+        run_numeric_checks, fetch_news_headlines, validate_thesis_against_news,
+        extract_thesis_oneliner, CheckResult,
+    )
+
+    api_key, api_secret = resolve_credentials(key, secret)
+    client = create_client(api_key, api_secret, paper=not live)
+
+    portfolio, pending, position_prices, position_details = fetch_portfolio(client)
+
+    all_tickers = list(portfolio.holdings.keys())
+    if tickers:
+        extra = [normalize_ticker_symbol(t) for t in tickers]
+        for t in extra:
+            if t not in all_tickers:
+                all_tickers.append(t)
+
+    if not all_tickers:
+        console.print("[red]No positions to check.[/red]")
+        raise typer.Exit(1)
+
+    # Compute portfolio value
+    portfolio_value = portfolio.cash
+    for sym, qty in portfolio.holdings.items():
+        price = position_prices.get(sym, 0)
+        portfolio_value += qty * price
+
+    # Load previous portfolio value from last check (if saved)
+    check_state_path = Path(output_dir) / "_check" / "last_value.txt"
+    previous_value = None
+    if check_state_path.is_file():
+        try:
+            previous_value = float(check_state_path.read_text().strip())
+        except (ValueError, OSError):
+            pass
+
+    # --- Tier: numeric ---
+    result = run_numeric_checks(
+        position_details=position_details,
+        current_prices=position_prices,
+        portfolio_value=portfolio_value,
+        previous_portfolio_value=previous_value,
+        strategy=strategy.lower(),
+    )
+
+    # --- headlines ---
+    if update_strategy.lower() in ("headlines", "escalate", "full"):
+        from tradingagents.llm_clients import create_llm_client
+
+        headlines = fetch_news_headlines(api_key, api_secret, all_tickers)
+
+        backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
+        llm_client = create_llm_client(
+            provider=provider.lower(),
+            model=quick_model,
+            base_url=backend_url,
+        )
+        llm = llm_client.get_llm()
+
+        for sym in all_tickers:
+            sym_headlines = headlines.get(sym, [])
+            if not sym_headlines:
+                continue
+
+            report_dir = _find_latest_report_dir(output_dir, sym)
+            if report_dir is None:
+                continue
+            state = _load_report_from_disk(report_dir)
+            ftd = state.get("final_trade_decision", "")
+            if not ftd:
+                continue
+
+            thesis = extract_thesis_oneliner(ftd)
+            invalidated, reason = validate_thesis_against_news(llm, sym, thesis, sym_headlines)
+
+            if invalidated:
+                result.add_alert(sym, "red", f"thesis invalidated: {reason}")
+
+    # --- determine which tickers to re-analyze ---
+    flagged_tickers = []
+    if update_strategy.lower() == "escalate":
+        flagged_tickers = [a.symbol for a in result.alerts if a.level == "red"]
+    elif update_strategy.lower() == "full":
+        flagged_tickers = list(all_tickers)
+
+    # Save current portfolio value for next check
+    check_state_path.parent.mkdir(parents=True, exist_ok=True)
+    check_state_path.write_text(str(portfolio_value))
+
+    # --- Output ---
+    if quiet:
+        if result.has_red:
+            for a in result.alerts:
+                if a.level == "red":
+                    for r in a.reasons:
+                        console.print(f"[red]{a.symbol}: {r}[/red]")
+            raise typer.Exit(1)
+        raise typer.Exit(0)
+
+    # Full output table
+    from rich.table import Table as RichTable
+
+    table = RichTable(title="Portfolio Health Check", box=box.ROUNDED)
+    table.add_column("Ticker", style="bold")
+    table.add_column("Status")
+    table.add_column("Details")
+
+    level_style = {"green": "green", "yellow": "yellow", "red": "bold red"}
+
+    for alert in sorted(result.alerts, key=lambda a: {"red": 0, "yellow": 1, "green": 2}[a.level]):
+        style = level_style[alert.level]
+        status_icon = {"green": "OK", "yellow": "WARN", "red": "ALERT"}[alert.level]
+        details = "; ".join(alert.reasons) if alert.reasons else "—"
+        table.add_row(alert.symbol, f"[{style}]{status_icon}[/{style}]", details)
+
+    console.print(table)
+
+    if result.portfolio_alerts:
+        for pa in result.portfolio_alerts:
+            console.print(f"[bold yellow]{pa}[/bold yellow]")
+
+    console.print(f"\n[dim]Portfolio value: ${portfolio_value:,.2f}[/dim]")
+    if previous_value:
+        change = ((portfolio_value - previous_value) / previous_value) * 100
+        console.print(f"[dim]Change since last check: {change:+.1f}%[/dim]")
+
+    # Escalation / full re-analysis
+    if update_strategy.lower() in ("escalate", "full") and flagged_tickers:
+        label = "Escalating" if update_strategy.lower() == "escalate" else "Running full re-analysis for"
+        console.print(f"\n[bold red]{label}: {', '.join(flagged_tickers)}[/bold red]")
+
+        analysis_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        all_analyst_keys = ["market", "social", "news", "fundamentals"]
+        backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
+        selections = {
+            "research_depth": DEPTH_MAP.get("medium", 3),
+            "llm_provider": provider.lower(),
+            "backend_url": backend_url,
+            "shallow_thinker": quick_model,
+            "deep_thinker": deep_model,
+            "google_thinking_level": None,
+            "openai_reasoning_effort": None,
+            "anthropic_effort": None,
+            "output_language": "English",
+        }
+        config = _build_config(selections)
+
+        graph = TradingAgentsGraph(all_analyst_keys, config=config, debug=True)
+
+        for ticker in flagged_tickers:
+            console.print(f"\n[cyan]Re-analyzing {ticker}...[/cyan]")
+            ticker_output = output_dir / f"{ticker}_{analysis_date}"
+            try:
+                _run_single_ticker(
+                    ticker=ticker,
+                    analysis_date=analysis_date,
+                    selected_analyst_keys=all_analyst_keys,
+                    config=config,
+                    graph=graph,
+                    output_dir=ticker_output,
+                )
+                console.print(f"[green]{ticker} re-analysis complete.[/green]")
+            except Exception as e:
+                console.print(f"[red]{ticker} re-analysis failed: {e}[/red]")
+
+
 if __name__ == "__main__":
     app()

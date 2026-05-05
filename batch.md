@@ -324,6 +324,76 @@ Both modes require a previous report to exist in the output directory. If no pri
 
 ---
 
+## `check` — Lightweight Health Check
+
+Quick portfolio sanity check without running the full analysis pipeline. Connects to Alpaca, pulls current prices, and validates against existing reports.
+
+### Tiers
+
+| Update Strategy | What it does | Cost |
+|------|-------------|------|
+| `numeric` | Price-based checks only: stop-loss, intraday drop, concentration, portfolio drawdown | Free (API only) |
+| `headlines` | numeric + fetch news headlines + quick LLM thesis validation per ticker | ~1 cheap LLM call per ticker |
+| `escalate` | headlines + full re-analysis for any ticker flagged red | Full pipeline cost per flagged ticker |
+| `full` | headlines + full re-analysis for ALL tickers regardless of alerts | Full pipeline cost for entire portfolio |
+
+### Usage
+
+```bash
+# Quick numeric check — runs in seconds, no LLM
+tradingagents check
+
+# Include news headline validation
+tradingagents check -t headlines
+
+# Auto-escalate: re-analyze anything that flags red
+tradingagents check -t escalate
+
+# Full: check everything, then re-analyze all positions
+tradingagents check -t full
+
+# Check specific tickers (in addition to portfolio holdings)
+tradingagents check NUVL CYTK -t headlines
+
+# Cron-friendly: exit code 0 = all clear, 1 = red alerts
+tradingagents check --quiet
+
+# Use aggressive thresholds (more tolerant of drawdowns)
+tradingagents check -s aggressive
+
+# With custom LLM for headline validation
+tradingagents check -t headlines -p openai --quick-model gpt-4o-mini
+```
+
+### Numeric Checks
+
+- **Stop-loss:** Drawdown from entry price vs strategy thresholds (same as `--no-stop-loss` feature)
+- **Intraday crash:** >5% drop since today's open (warning), >10% (critical)
+- **Concentration:** Single position >35% of portfolio (warning), >50% (critical)
+- **Portfolio drawdown:** Total value drop since last check >5% (warning), >10% (critical)
+
+### Headline Validation
+
+For each ticker with a previous report on disk, fetches recent news via Alpaca News API and asks a quick LLM: "Does any headline invalidate the investment thesis?" Only flags as red if a headline represents a material change (earnings miss, regulatory rejection, fraud, etc.).
+
+### All Options
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `TICKERS` | | *(from portfolio)* | Extra tickers to check |
+| `--key` | | `ALPACA_API_KEY` env | Alpaca API key |
+| `--secret` | | `ALPACA_API_SECRET` env | Alpaca API secret |
+| `--live` | | `false` | Use live trading account |
+| `--output-dir` | `-o` | `./reports` | Directory with existing reports |
+| `--strategy` | `-s` | `balanced` | Strategy for stop-loss thresholds |
+| `--update-strategy` | `-t` | `numeric` | Check depth: `numeric`, `headlines`, `escalate`, `full` |
+| `--provider` | `-p` | `ollama` | LLM provider (headlines/escalate) |
+| `--quick-model` | | `qwen3:8b` | Model for headline validation |
+| `--deep-model` | | `qwen3:32b` | Model for escalated re-analysis |
+| `--quiet` | `-q` | `false` | Minimal output; exit 0=clear, 1=alerts |
+
+---
+
 ## Report Directory Structure
 
 After a run, `--output-dir` (default `./reports`) contains:
@@ -351,4 +421,6 @@ reports/
     merge_report.md
   _trades/                          # paper command only
     trade_log_20260503_141500.md
+  _check/                           # check command state
+    last_value.txt
 ```
