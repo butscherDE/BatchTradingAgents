@@ -310,6 +310,7 @@ def parse_orders(
     tax_context_str: str = "",
     allocation_checks: int = 0,
     risk_context_str: str = "",
+    on_stage1_done: Optional[callable] = None,
     on_check_start: Optional[callable] = None,
     on_check_done: Optional[callable] = None,
 ) -> TradePlan:
@@ -320,6 +321,8 @@ def parse_orders(
         tax_context_str=tax_context_str,
         risk_context_str=risk_context_str,
     )
+    if on_stage1_done:
+        on_stage1_done()
 
     for i in range(allocation_checks):
         if on_check_start:

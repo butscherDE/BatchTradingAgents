@@ -80,8 +80,10 @@ class PipelineStatus:
         self.step_start = time.time()
         self._append_output("Generating allocation plan...")
 
-    def finish_allocation(self, reasoning=""):
+    def finish_alloc_stage1(self):
         self.alloc_completed += 1
+
+    def finish_allocation(self, reasoning=""):
         if reasoning:
             self._append_output(f"Allocation: {reasoning[:120]}")
 
