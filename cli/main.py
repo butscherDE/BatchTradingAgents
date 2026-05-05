@@ -1885,6 +1885,10 @@ def paper(
         0, "--allocation-checks",
         help="Number of validation passes on the allocation plan",
     ),
+    reuse_merge: bool = typer.Option(
+        False, "--reuse-merge",
+        help="Skip merge report generation; reuse the last saved merge report. Fails if none exists.",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1893,6 +1897,14 @@ def paper(
     )
     from cli.order_parser import parse_orders, format_pending_orders
     from cli.tax import compute_tax_context, format_tax_context_for_prompt, format_tax_context_for_portfolio
+
+    reused_merge_path = output_dir / "_comparison" / "merge_report.md"
+    if reuse_merge and not reused_merge_path.is_file():
+        console.print(
+            f"[red]--reuse-merge specified but no merge report found at "
+            f"{reused_merge_path.resolve()}[/red]"
+        )
+        raise typer.Exit(1)
 
     api_key, api_secret = resolve_credentials(key, secret)
 
@@ -1971,11 +1983,12 @@ def paper(
     from cli.status_dashboard import PipelineStatus, create_pipeline_layout, update_pipeline_display, extract_report_summary
     from rich.live import Live as PipelineLive
 
+    effective_merge_checks = 0 if reuse_merge else merge_checks
     pipeline = PipelineStatus(
         tickers=list(all_tickers),
         ticker_states={t: "pending" for t in all_tickers},
         total_tickers=len(all_tickers),
-        merge_total=1 + merge_checks,
+        merge_total=1 + effective_merge_checks,
         alloc_total=1 + allocation_checks,
         show_allocation=True,
     )
@@ -2054,30 +2067,37 @@ def paper(
                     pipeline.mark_ticker_failed(ticker, str(e))
                 update_pipeline_display(pipeline_layout, pipeline)
 
-        if len(completed_states) < 2:
+        do_merge_phase = reuse_merge or len(completed_states) >= 2
+        if not do_merge_phase:
             pipeline._append_output("Need at least 2 analyses for merge. Stopping.")
             update_pipeline_display(pipeline_layout, pipeline)
 
         merge_report = None
         trade_plan = None
 
-        if len(completed_states) >= 2:
+        if do_merge_phase:
             portfolio_dict = portfolio.to_dict()
 
             pipeline.start_merge()
             update_pipeline_display(pipeline_layout, pipeline)
-            merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
+            if reuse_merge:
+                merge_report = reused_merge_path.read_text(encoding="utf-8")
+                report_path = reused_merge_path
+                pipeline._append_output(f"Reusing merge report at {reused_merge_path}")
+            else:
+                merge_report = _generate_merge_report(completed_states, config, portfolio=portfolio_dict, strategy=strategy_text, tax_summaries=tax_portfolio_summaries)
             pipeline.finish_merge()
             update_pipeline_display(pipeline_layout, pipeline)
 
-            for i in range(merge_checks):
-                pipeline.start_merge_check(i + 1, merge_checks)
-                update_pipeline_display(pipeline_layout, pipeline)
-                merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
-                pipeline.finish_merge_check()
-                update_pipeline_display(pipeline_layout, pipeline)
+            if not reuse_merge:
+                for i in range(merge_checks):
+                    pipeline.start_merge_check(i + 1, merge_checks)
+                    update_pipeline_display(pipeline_layout, pipeline)
+                    merge_report = _validate_merge_report(merge_report, completed_states, config, strategy=strategy_text, portfolio=portfolio_dict)
+                    pipeline.finish_merge_check()
+                    update_pipeline_display(pipeline_layout, pipeline)
 
-            report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
+                report_path = _save_merge_report(merge_report, output_dir, [t for t, _, _ in completed_states])
 
             pipeline.start_allocation()
             update_pipeline_display(pipeline_layout, pipeline)
@@ -2090,7 +2110,7 @@ def paper(
 
     # --- Dashboard closed, print final outputs ---
 
-    if len(completed_states) < 2:
+    if not reuse_merge and len(completed_states) < 2:
         console.print("[yellow]Need at least 2 successful analyses for a merge report. Skipping trade execution.[/yellow]")
         return
 

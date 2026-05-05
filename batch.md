@@ -179,6 +179,23 @@ tradingagents paper --dry-run --skip-analysis NVDA
 
 Tickers without an existing report are skipped with a warning.
 
+### Reuse Last Merge Report
+
+Skip the merge report step entirely and reuse the most recent `_comparison/merge_report.md` from the output directory. The command fails fast if no merge report exists. Combine with `--skip-analysis` to re-run trade allocation against an already-produced merge without re-doing per-ticker analyses.
+
+```bash
+# Reuse last merge — still runs analyses, but skips the merge generation step
+tradingagents paper --reuse-merge
+
+# Fastest re-run: skip analysis and reuse the last merge to recompute allocation only
+tradingagents paper --skip-analysis --reuse-merge
+
+# Pair with --dry-run to inspect the trade plan without submitting orders
+tradingagents paper --skip-analysis --reuse-merge --dry-run
+```
+
+When `--reuse-merge` is set, `--merge-checks` is ignored.
+
 ### Live Trading
 
 ```bash
@@ -241,6 +258,7 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--auto-execute` | | `false` | Execute orders immediately without confirmation |
 | `--skip-analysis` | | `false` | Use existing reports instead of running analysis |
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
+| `--reuse-merge` | | `false` | Skip merge report generation; reuse last saved merge report (fails if none) |
 | `--merge-checks` | | `0` | Validation passes on the merge report |
 | `--allocation-checks` | | `0` | Validation passes on the allocation plan |
 | `--strategy` | `-s` | `balanced` | Risk strategy: `conservative`, `balanced`, `aggressive`, `yolo` |
