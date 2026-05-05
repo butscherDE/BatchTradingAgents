@@ -106,10 +106,14 @@ def extract_report_summary(final_trade_decision: str, ticker: str, decision: str
             capturing = True
             continue
         if capturing:
-            if stripped.startswith("**") and not stripped.startswith("**Executive"):
+            if stripped.startswith("**"):
+                break
+            if not stripped and summary_lines:
                 break
             if stripped:
                 summary_lines.append(stripped)
+            if len(summary_lines) >= 6:
+                break
 
     header = f"{ticker} — {decision}"
     if summary_lines:
@@ -215,6 +219,12 @@ def update_pipeline_display(layout: Layout, status: PipelineStatus):
     console_height = Console().height or 24
     available_lines = max(5, console_height - 6 - 4)
 
+    # Reserve space for active ticker indicator
+    active_suffix = ""
+    if status.current_ticker and status.ticker_states.get(status.current_ticker) == "active":
+        active_suffix = f"\n\n{status.current_ticker} — analyzing..."
+        available_lines -= 3
+
     # Build visible entries from newest, fitting as many as possible
     visible_entries = []
     lines_used = 0
@@ -227,6 +237,7 @@ def update_pipeline_display(layout: Layout, status: PipelineStatus):
 
     visible_entries.reverse()
     output_text = "\n\n".join(visible_entries) if visible_entries else "Waiting..."
+    output_text += active_suffix
     output_content = Text(output_text)
 
     layout["output"].update(
