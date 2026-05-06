@@ -186,7 +186,19 @@ def _stage1_allocations(
 - Be decisive and follow the report's ratings."""
 
     structured_llm = llm.with_structured_output(AllocationPlan)
-    return structured_llm.invoke(prompt)
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception as e:
+        raise RuntimeError(
+            f"Stage 1 allocation failed — LLM structured output error: {type(e).__name__}: {e}"
+        ) from e
+    if result is None:
+        raise RuntimeError(
+            f"Stage 1 allocation returned None — LLM could not produce valid AllocationPlan "
+            f"(prompt had {len(portfolio_dict['holdings'])} holdings + "
+            f"{sum(1 for s in quotes if s not in portfolio_dict['holdings'])} new tickers)"
+        )
+    return result
 
 
 def _validate_allocation(
@@ -229,7 +241,24 @@ Reasoning: {allocation.reasoning}
 **Your task:** If you find issues, output a CORRECTED allocation with the same format. Fix percentage inconsistencies, add missing tickers, and ensure ranking order is respected. If the allocation passes all checks, return it unchanged."""
 
     structured_llm = llm.with_structured_output(AllocationPlan)
-    return structured_llm.invoke(prompt)
+    try:
+        result = structured_llm.invoke(prompt)
+    except Exception as e:
+        import sys
+        print(
+            f"[allocation validation] LLM structured output error: {type(e).__name__}: {e}",
+            file=sys.stderr,
+        )
+        return None
+    if result is None:
+        import sys
+        print(
+            f"[allocation validation] LLM returned None — "
+            f"could not parse response into AllocationPlan "
+            f"({len(allocation.allocations)} tickers in input)",
+            file=sys.stderr,
+        )
+    return result
 
 
 def _stage2_orders(
@@ -321,13 +350,17 @@ def parse_orders(
         tax_context_str=tax_context_str,
         risk_context_str=risk_context_str,
     )
+    if allocation is None:
+        raise RuntimeError("Allocation generation failed — LLM returned no structured output (too many tickers?)")
     if on_stage1_done:
         on_stage1_done()
 
     for i in range(allocation_checks):
         if on_check_start:
             on_check_start(i + 1, allocation_checks)
-        allocation = _validate_allocation(llm, allocation, merge_report, strategy)
+        validated = _validate_allocation(llm, allocation, merge_report, strategy)
+        if validated is not None:
+            allocation = validated
         if on_check_done:
             on_check_done()
 

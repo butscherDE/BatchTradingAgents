@@ -2212,6 +2212,8 @@ def paper(
         merge_report = None
         trade_plan = None
         allocation_plan = None
+        trade_plan_error = None
+        allocation_plan = None
 
         if do_merge_phase:
             portfolio_dict = portfolio.to_dict()
@@ -2266,6 +2268,7 @@ def paper(
                 trade_plan, allocation_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_stage1_done=_on_alloc_stage1_done, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
                 pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
             except Exception as e:
+                trade_plan_error = str(e)
                 pipeline._append_output(f"Trade plan failed: {e}")
             update_pipeline_display(pipeline_layout, pipeline)
 
@@ -2280,7 +2283,7 @@ def paper(
     console.print(Panel(Markdown(merge_report), title="Cross-Ticker Comparison", border_style="green"))
 
     if trade_plan is None:
-        console.print("[red]Trade plan generation failed.[/red]")
+        console.print(f"[red]Trade plan generation failed: {trade_plan_error or 'unknown error'}[/red]")
         return
 
     if not trade_plan.orders:
