@@ -78,7 +78,7 @@ def format_pending_orders(pending: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _get_llm(config):
+def get_llm(config):
     from tradingagents.llm_clients import create_llm_client
 
     llm_kwargs = {}
@@ -313,8 +313,8 @@ def parse_orders(
     on_stage1_done: Optional[callable] = None,
     on_check_start: Optional[callable] = None,
     on_check_done: Optional[callable] = None,
-) -> TradePlan:
-    llm = _get_llm(config)
+) -> tuple[TradePlan, AllocationPlan]:
+    llm = get_llm(config)
 
     allocation = _stage1_allocations(
         llm, merge_report, portfolio_dict, quotes, pending, strategy,
@@ -331,4 +331,4 @@ def parse_orders(
         if on_check_done:
             on_check_done()
 
-    return _stage2_orders(allocation, portfolio_dict, quotes)
+    return _stage2_orders(allocation, portfolio_dict, quotes), allocation

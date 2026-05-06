@@ -2211,6 +2211,7 @@ def paper(
 
         merge_report = None
         trade_plan = None
+        allocation_plan = None
 
         if do_merge_phase:
             portfolio_dict = portfolio.to_dict()
@@ -2262,7 +2263,7 @@ def paper(
                     pipeline.finish_alloc_check()
                     update_pipeline_display(pipeline_layout, pipeline)
 
-                trade_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_stage1_done=_on_alloc_stage1_done, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
+                trade_plan, allocation_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_stage1_done=_on_alloc_stage1_done, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
                 pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
             except Exception as e:
                 pipeline._append_output(f"Trade plan failed: {e}")
@@ -2411,18 +2412,52 @@ def paper(
     )
     console.print(proj_table)
 
+    from cli.chat import TradeChatContext, run_trade_chat
+    from rich.prompt import Prompt
+
+    chat_ctx = TradeChatContext(
+        merge_report=merge_report,
+        portfolio_dict=portfolio_dict,
+        position_prices=position_prices,
+        quotes=quotes,
+        pending=pending,
+        strategy_text=strategy_text,
+        tax_prompt_str=tax_prompt_str,
+        risk_context_str=risk_context_str,
+        config=config,
+        mode=mode,
+        output_dir=Path(output_dir),
+        trade_plan=trade_plan,
+        allocation_plan=allocation_plan,
+        original_trade_plan=trade_plan,
+        original_allocation_plan=allocation_plan,
+    )
+
     if dry_run:
-        console.print("\n[yellow]Dry-run mode — no orders submitted.[/yellow]")
+        console.print("\n[yellow]Dry-run mode — no orders will be submitted.[/yellow]")
+        console.print("[dim]Entering chat. /help for commands, /exit to leave.[/dim]\n")
+        run_trade_chat(chat_ctx, console)
         return
 
     if not auto_execute:
-        confirm = typer.prompt(
-            f"\nSubmit {len(trade_plan.orders)} order(s) to Alpaca ({mode})? [y/N]",
-            default="N",
-        ).strip().upper()
-        if confirm not in ("Y", "YES"):
-            console.print("[yellow]Aborted — no orders submitted.[/yellow]")
-            return
+        while True:
+            choice = Prompt.ask(
+                f"\nSubmit {len(chat_ctx.trade_plan.orders)} order(s) to Alpaca ({mode})?  "
+                "[bold green]e[/]xecute  [bold cyan]c[/]hat  [bold red]n[/]o-go",
+                choices=["e", "c", "n"], default="n", case_sensitive=False,
+            ).lower()
+            if choice == "n":
+                console.print("[yellow]Aborted — no orders submitted.[/yellow]")
+                return
+            if choice == "c":
+                chat_ctx = run_trade_chat(chat_ctx, console)
+                if not chat_ctx.trade_plan.orders:
+                    console.print("[yellow]No orders to submit after chat.[/yellow]")
+                    return
+                continue
+            break  # 'e'
+
+    trade_plan = chat_ctx.trade_plan  # may have been edited via /propose
 
     console.print(f"\n[bold cyan]Submitting {len(trade_plan.orders)} order(s) to Alpaca ({mode})...[/bold cyan]")
     order_dicts = [{"symbol": o.symbol, "side": o.side, "qty": int(o.qty)} for o in trade_plan.orders]
@@ -2462,6 +2497,11 @@ def paper(
         f"**Date:** {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
         f"**Mode:** {mode}",
         f"",
+    ]
+    if chat_ctx.transcript_path is not None and chat_ctx.transcript_path.exists():
+        log_lines.append(f"**Chat transcript:** {chat_ctx.transcript_path.name}")
+        log_lines.append("")
+    log_lines += [
         f"## Trade Plan",
         f"**Reasoning:** {trade_plan.reasoning}",
         f"",
