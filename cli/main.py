@@ -2441,16 +2441,22 @@ def paper(
 
     if not auto_execute:
         while True:
-            choice = Prompt.ask(
-                f"\nSubmit {len(chat_ctx.trade_plan.orders)} order(s) to Alpaca ({mode})?  "
-                "[bold green]e[/]xecute  [bold cyan]c[/]hat  [bold red]n[/]o-go",
-                choices=["e", "c", "n"], default="n", case_sensitive=False,
-            ).lower()
+            try:
+                choice = Prompt.ask(
+                    f"\nSubmit {len(chat_ctx.trade_plan.orders)} order(s) to Alpaca ({mode})?  "
+                    "[bold green]e[/]xecute  [bold cyan]c[/]hat  [bold red]n[/]o-go",
+                    choices=["e", "c", "n"], default="n", case_sensitive=False,
+                ).lower()
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[yellow]Aborted — no orders submitted.[/yellow]")
+                return
             if choice == "n":
                 console.print("[yellow]Aborted — no orders submitted.[/yellow]")
                 return
             if choice == "c":
                 chat_ctx = run_trade_chat(chat_ctx, console)
+                if chat_ctx.execute_requested:
+                    break  # proceed to execution
                 if not chat_ctx.trade_plan.orders:
                     console.print("[yellow]No orders to submit after chat.[/yellow]")
                     return

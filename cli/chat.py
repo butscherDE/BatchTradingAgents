@@ -45,6 +45,7 @@ SECTION_FILE_MAP = {
 }
 
 EXIT_KEYWORDS = {"/exit", "/quit", "/done", "/q"}
+EXECUTE_KEYWORDS = {"/execute", "/exec", "/go"}
 HISTORY_SOFT_CAP = 24
 TOOL_LOOP_CAP = 5
 TOOL_RESULT_CHAR_CAP = 32_000
@@ -70,6 +71,7 @@ class TradeChatContext:
     original_allocation_plan: AllocationPlan
 
     transcript_path: Optional[Path] = None
+    execute_requested: bool = False
 
 
 def _find_latest_ticker_dir(output_dir: Path, ticker: str) -> Optional[Path]:
@@ -389,6 +391,7 @@ def _print_help(console: Console) -> None:
     table.add_column("Command", style="cyan")
     table.add_column("What it does")
     table.add_row("/help", "Show this table")
+    table.add_row("/execute, /exec, /go", "Submit orders and exit chat")
     table.add_row("/propose [instruction]", "Re-run allocation with the conversation + your instruction")
     table.add_row("/revert", "Restore the original plan")
     table.add_row("/diff", "Show old → new plan diff")
@@ -436,7 +439,7 @@ def run_trade_chat(ctx: TradeChatContext, console: Console) -> TradeChatContext:
     transcript = TranscriptWriter(ctx.transcript_path, ctx.mode, len(ctx.trade_plan.orders))
 
     console.print(
-        "[dim]/help · /propose [instruction] · /revert · /exit · "
+        "[dim]/help · /propose [instruction] · /revert · /execute · /exit · "
         "Ctrl+C interrupts a response · Ctrl+D exits[/dim]"
     )
 
@@ -449,6 +452,9 @@ def run_trade_chat(ctx: TradeChatContext, console: Console) -> TradeChatContext:
             except (KeyboardInterrupt, EOFError):
                 console.print("\n[dim](exit)[/dim]")
                 break
+            except Exception:
+                console.print("\n[dim](exit)[/dim]")
+                break
 
             if not line:
                 continue
@@ -457,6 +463,9 @@ def run_trade_chat(ctx: TradeChatContext, console: Console) -> TradeChatContext:
             cmd = lower.split(maxsplit=1)[0] if lower.startswith("/") else None
 
             if cmd in EXIT_KEYWORDS:
+                break
+            if cmd in EXECUTE_KEYWORDS:
+                ctx.execute_requested = True
                 break
             if cmd == "/help":
                 _print_help(console)
