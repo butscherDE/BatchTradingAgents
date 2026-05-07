@@ -367,6 +367,8 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--continuity` | | `none` | Report continuity: `none`, `anchored`, `reconcile` |
 | `--watchlist` | `-w` | | Named watchlist section from `watchlists.toml` |
 | `--watchlist-file` | | *(auto)* | Path to watchlists TOML file |
+| `--reuse-alloc` | | `false` | Skip allocation; reuse last saved plan (fails if none) |
+| `--prune-watchlist` | | `false` | Recommend tickers to remove from watchlist after allocation |
 
 ---
 
@@ -499,6 +501,9 @@ reports/
     ...
   _comparison/
     merge_report.md
+  _allocations/                      # paper command
+    allocation_plan.json
+    trade_plan.json
   _trades/                          # paper command only
     trade_log_20260503_141500.md
   _check/                           # check command state

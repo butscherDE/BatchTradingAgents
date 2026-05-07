@@ -1962,6 +1962,14 @@ def paper(
         None, "--watchlist-file",
         help="Path to watchlists.toml (default: ./watchlists.toml or ~/.tradingagents/watchlists.toml)",
     ),
+    reuse_alloc: bool = typer.Option(
+        False, "--reuse-alloc",
+        help="Skip allocation generation; reuse the last saved allocation plan. Fails if none exists.",
+    ),
+    prune_watchlist: bool = typer.Option(
+        False, "--prune-watchlist",
+        help="After allocation, recommend tickers to remove from watchlist (no buying prospect this week)",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1977,6 +1985,14 @@ def paper(
         console.print(
             f"[red]--reuse-merge specified but no merge report found at "
             f"{reused_merge_path.resolve()}[/red]"
+        )
+        raise typer.Exit(1)
+
+    reused_alloc_path = output_dir / "_allocations" / "allocation_plan.json"
+    if reuse_alloc and not reused_alloc_path.is_file():
+        console.print(
+            f"[red]--reuse-alloc specified but no allocation plan found at "
+            f"{reused_alloc_path.resolve()}[/red]"
         )
         raise typer.Exit(1)
 
@@ -2290,20 +2306,35 @@ def paper(
             pipeline.start_allocation()
             update_pipeline_display(pipeline_layout, pipeline)
             try:
-                def _on_alloc_stage1_done():
-                    pipeline.finish_alloc_stage1()
-                    update_pipeline_display(pipeline_layout, pipeline)
+                if reuse_alloc:
+                    import json
+                    from cli.order_parser import AllocationPlan, _stage2_orders
+                    alloc_json = reused_alloc_path.read_text(encoding="utf-8")
+                    allocation_plan = AllocationPlan.model_validate_json(alloc_json)
+                    trade_plan = _stage2_orders(allocation_plan, portfolio_dict, {**position_prices, **quotes})
+                    pipeline._append_output(f"Reusing allocation plan from {reused_alloc_path.name}")
+                    pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
+                else:
+                    def _on_alloc_stage1_done():
+                        pipeline.finish_alloc_stage1()
+                        update_pipeline_display(pipeline_layout, pipeline)
 
-                def _on_alloc_check_start(i, total):
-                    pipeline.start_alloc_check(i, total)
-                    update_pipeline_display(pipeline_layout, pipeline)
+                    def _on_alloc_check_start(i, total):
+                        pipeline.start_alloc_check(i, total)
+                        update_pipeline_display(pipeline_layout, pipeline)
 
-                def _on_alloc_check_done():
-                    pipeline.finish_alloc_check()
-                    update_pipeline_display(pipeline_layout, pipeline)
+                    def _on_alloc_check_done():
+                        pipeline.finish_alloc_check()
+                        update_pipeline_display(pipeline_layout, pipeline)
 
-                trade_plan, allocation_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_stage1_done=_on_alloc_stage1_done, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
-                pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
+                    trade_plan, allocation_plan = parse_orders(merge_report, portfolio_dict, {**position_prices, **quotes}, pending, config, strategy=strategy_text, tax_context_str=tax_prompt_str, allocation_checks=allocation_checks, risk_context_str=risk_context_str, on_stage1_done=_on_alloc_stage1_done, on_check_start=_on_alloc_check_start, on_check_done=_on_alloc_check_done)
+                    pipeline.finish_allocation(trade_plan.reasoning if trade_plan.orders else "No trades recommended")
+
+                    # Save allocation to disk
+                    alloc_dir = Path(output_dir) / "_allocations"
+                    alloc_dir.mkdir(parents=True, exist_ok=True)
+                    (alloc_dir / "allocation_plan.json").write_text(allocation_plan.model_dump_json(indent=2), encoding="utf-8")
+                    (alloc_dir / "trade_plan.json").write_text(trade_plan.model_dump_json(indent=2), encoding="utf-8")
             except Exception as e:
                 trade_plan_error = str(e)
                 pipeline._append_output(f"Trade plan failed: {e}")
@@ -2318,6 +2349,45 @@ def paper(
     console.print(f"[green]Merge report saved to:[/green] {report_path.resolve()}")
     console.print()
     console.print(Panel(Markdown(merge_report), title="Cross-Ticker Comparison", border_style="green"))
+
+    # --- Prune watchlist recommendations ---
+    if prune_watchlist and trade_plan is not None and allocation_plan is not None:
+        from cli.prune import generate_prune_recommendations
+        from tradingagents.llm_clients import create_llm_client as _create_prune_llm
+
+        # Collect per-ticker ratings
+        ticker_ratings = {t: d for t, d, _ in completed_states}
+
+        # Determine tickers that MUST be kept (currently held or buy orders)
+        held_tickers = set(portfolio.holdings.keys())
+        buy_order_tickers = {o.symbol for o in trade_plan.orders if o.side == "buy"}
+        keep_tickers = held_tickers | buy_order_tickers
+
+        _prune_client = _create_prune_llm(
+            provider=config["llm_provider"],
+            model=config["deep_think_llm"],
+            base_url=config.get("backend_url"),
+        )
+
+        prune_result = generate_prune_recommendations(
+            llm=_prune_client.get_llm(),
+            watchlist_tickers=all_tickers,
+            allocation_plan=allocation_plan,
+            merge_report=merge_report,
+            ticker_ratings=ticker_ratings,
+            keep_tickers=keep_tickers,
+        )
+
+        if prune_result:
+            prune_table = Table(title="Watchlist Prune Recommendations", box=box.ROUNDED, header_style="bold magenta")
+            prune_table.add_column("Symbol", style="cyan")
+            prune_table.add_column("Reason")
+            for sym, reason in prune_result:
+                prune_table.add_row(sym, reason)
+            console.print()
+            console.print(prune_table)
+        else:
+            console.print("\n[green]No watchlist removals recommended — all tickers have near-term relevance.[/green]")
 
     if trade_plan is None:
         console.print(f"[red]Trade plan generation failed: {trade_plan_error or 'unknown error'}[/red]")
