@@ -2120,7 +2120,7 @@ def paper(
         elif us in ("numeric", "headlines", "escalate"):
             from cli.check import (
                 run_numeric_checks, fetch_news_headlines,
-                validate_thesis_against_news, extract_thesis_oneliner,
+                validate_thesis_against_news,
             )
 
             # Determine which tickers are candidates for the update checks
@@ -2150,15 +2150,19 @@ def paper(
 
             # Headline validation — for ALL candidates (not just held)
             if us in ("headlines", "escalate"):
+                from cli.check import extract_report_context
                 candidate_tickers_for_news = [t for t in all_tickers if t in candidates]
+
                 news_headlines = fetch_news_headlines(api_key, api_secret, candidate_tickers_for_news)
                 from tradingagents.llm_clients import create_llm_client as _create_check_llm
                 _check_client = _create_check_llm(
                     provider=config["llm_provider"],
-                    model=config["quick_think_llm"],
+                    model=config["deep_think_llm"],
                     base_url=config.get("backend_url"),
                 )
                 _check_llm = _check_client.get_llm()
+
+                all_prices = {**position_prices, **quotes}
 
                 for sym in candidate_tickers_for_news:
                     sym_headlines = news_headlines.get(sym, [])
@@ -2171,10 +2175,18 @@ def paper(
                     ftd = state.get("final_trade_decision", "")
                     if not ftd:
                         continue
-                    thesis = extract_thesis_oneliner(ftd)
-                    invalidated, reason = validate_thesis_against_news(_check_llm, sym, thesis, sym_headlines)
-                    if invalidated:
-                        check_result.add_alert(sym, "red", f"material change: {reason}")
+                    ctx = extract_report_context(state)
+                    flagged, reason = validate_thesis_against_news(
+                        _check_llm, sym, sym_headlines,
+                        current_price=all_prices.get(sym),
+                        report_rating=ctx["rating"],
+                        report_executive_summary=ctx["executive_summary"],
+                        report_news_summary=ctx["news_summary"],
+                    )
+                    if flagged:
+                        check_result.add_alert(sym, "red", f"not verified: {reason}")
+                    else:
+                        check_result.add_alert(sym, "green", f"verified: {reason}")
 
             # Determine flagged tickers (union with already-flagged missing-report tickers)
             if us == "numeric":
@@ -2189,12 +2201,21 @@ def paper(
                 flagged_reasons = []
                 for a in check_result.alerts:
                     if a.symbol in tickers_to_analyze and a.reasons:
-                        flagged_reasons.append(f"{a.symbol}: {a.reasons[0]}")
-                # Tickers flagged for missing reports
+                        flagged_reasons.append(f"[RE-ANALYZE] {a.symbol}: {a.reasons[0]}")
                 for sym in tickers_to_analyze:
                     if not any(a.symbol == sym for a in check_result.alerts if a.reasons):
-                        flagged_reasons.append(f"{sym}: no existing report")
+                        flagged_reasons.append(f"[RE-ANALYZE] {sym}: no existing report")
                 for line in flagged_reasons:
+                    pipeline._append_output(line)
+                update_pipeline_display(pipeline_layout, pipeline)
+
+            # Show rationale for skipped tickers
+            skipped_reasons = []
+            for a in check_result.alerts:
+                if a.symbol not in tickers_to_analyze and a.reasons:
+                    skipped_reasons.append(f"{a.symbol}: {a.reasons[0]}")
+            if skipped_reasons:
+                for line in skipped_reasons:
                     pipeline._append_output(line)
                 update_pipeline_display(pipeline_layout, pipeline)
 
@@ -2781,13 +2802,14 @@ def check(
     # --- headlines ---
     if update_strategy.lower() in ("headlines", "escalate", "full"):
         from tradingagents.llm_clients import create_llm_client
+        from cli.check import extract_report_context
 
         headlines = fetch_news_headlines(api_key, api_secret, all_tickers)
 
         backend_url = PROVIDER_BACKEND_URLS.get(provider.lower())
         llm_client = create_llm_client(
             provider=provider.lower(),
-            model=quick_model,
+            model=deep_model,
             base_url=backend_url,
         )
         llm = llm_client.get_llm()
@@ -2805,11 +2827,17 @@ def check(
             if not ftd:
                 continue
 
-            thesis = extract_thesis_oneliner(ftd)
-            invalidated, reason = validate_thesis_against_news(llm, sym, thesis, sym_headlines)
+            ctx = extract_report_context(state)
+            flagged, reason = validate_thesis_against_news(
+                llm, sym, sym_headlines,
+                current_price=position_prices.get(sym),
+                report_rating=ctx["rating"],
+                report_executive_summary=ctx["executive_summary"],
+                report_news_summary=ctx["news_summary"],
+            )
 
-            if invalidated:
-                result.add_alert(sym, "red", f"material change: {reason}")
+            if flagged:
+                result.add_alert(sym, "red", f"not verified: {reason}")
 
     # --- determine which tickers to re-analyze ---
     flagged_tickers = []

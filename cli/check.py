@@ -132,13 +132,17 @@ def fetch_news_headlines(api_key: str, api_secret: str, symbols: list[str], limi
 def validate_thesis_against_news(
     llm,
     ticker: str,
-    previous_thesis: str,
     headlines: list[str],
+    current_price: Optional[float] = None,
+    report_rating: str = "",
+    report_executive_summary: str = "",
+    report_news_summary: str = "",
 ) -> tuple[bool, str]:
-    """Quick LLM call: does the news materially change the prior thesis?
+    """Deep reasoning LLM call: does the current news + price still support the report's thesis?
 
-    Detects both invalidation (bearish news on a bullish thesis) and
-    new opportunities (bullish news on a bearish/hold thesis).
+    Feeds the LLM: current headlines, current price, and key sections from the
+    previous report (rating, executive summary, news summary). Asks whether
+    the report's conclusion is still valid.
 
     Returns (should_reanalyze: bool, explanation: str).
     """
@@ -146,39 +150,99 @@ def validate_thesis_against_news(
         return False, "No recent news"
 
     headlines_str = "\n".join(f"  - {h}" for h in headlines)
+    price_str = f"${current_price:,.2f}" if current_price else "(unavailable)"
 
-    prompt = f"""You are a portfolio monitor. Given the previous investment thesis and recent news headlines, determine if any headline represents a MATERIAL CHANGE that warrants re-analysis of this ticker.
+    prompt = f"""You are a senior portfolio analyst performing a thesis verification check. You have a previous analysis report for a ticker and need to determine whether the report's conclusions are still valid given the LATEST news and current price.
 
 **Ticker:** {ticker}
+**Current Price:** {price_str}
 
-**Previous thesis:**
-{previous_thesis}
+**Previous Report Rating:** {report_rating}
 
-**Recent headlines:**
+**Previous Executive Summary:**
+{report_executive_summary or "(not available)"}
+
+**Previous News Analysis (from report):**
+{report_news_summary or "(not available)"}
+
+**Latest News Headlines (most recent first):**
 {headlines_str}
 
-A material change includes:
-- News that INVALIDATES a bullish thesis (earnings miss, regulatory rejection, fraud, key contract loss, guidance cut)
-- News that creates a NEW OPPORTUNITY for a bearish/hold-rated ticker (surprise earnings beat, FDA approval, major partnership, activist investor, buyout rumor)
-- Significant sector-wide events that fundamentally change the outlook
+---
 
-General market noise, minor price moves, or analyst opinion changes are NOT material.
+**Your task:** Determine if the report's rating and thesis are STILL VALID given the latest information.
+
+The report should be RE-ANALYZED if:
+- A headline contradicts a key assumption in the executive summary or thesis
+- The current price has moved significantly beyond or against the report's price target or stop-loss levels
+- New material information emerged (earnings, FDA decision, M&A, fraud, guidance change, major partnership, sector shock) that the previous report could not have known about
+- The news suggests the rating should change (e.g., rated Buy but company just missed earnings badly)
+
+The report is STILL VALID if:
+- Headlines are consistent with the existing thesis (confirming what was already expected)
+- Price movement is within normal range for the thesis
+- News is minor/noise (analyst upgrades/downgrades, minor price targets, general market commentary)
+- Headlines are old news that was already reflected in the report
 
 Answer in this exact format:
-REANALYZE: YES or NO
-REASON: one sentence explanation"""
+VERIFIED: YES or NO
+REASON: one sentence explanation (be specific about what changed or why it's still fine)"""
 
     response = llm.invoke(prompt)
     text = response.content.strip()
 
-    should_reanalyze = "REANALYZE: YES" in text.upper()
+    # VERIFIED: YES means the thesis holds → don't reanalyze
+    # VERIFIED: NO means the thesis is broken → reanalyze
+    verified = "VERIFIED: YES" in text.upper()
     reason_line = ""
     for line in text.splitlines():
         if line.upper().startswith("REASON:"):
             reason_line = line.split(":", 1)[1].strip()
             break
 
-    return should_reanalyze, reason_line or text[:100]
+    return not verified, reason_line or text[:120]
+
+
+def extract_report_context(final_state: dict) -> dict[str, str]:
+    """Extract key sections from a loaded report state for thesis verification."""
+    ftd = final_state.get("final_trade_decision", "")
+
+    # Extract rating
+    rating = ""
+    for line in ftd.splitlines():
+        stripped = line.strip().lower()
+        if "rating" in stripped or "recommendation" in stripped:
+            rating = line.strip()
+            break
+
+    # Extract executive summary
+    executive_summary = ""
+    lines = ftd.splitlines()
+    capturing = False
+    summary_parts = []
+    for line in lines:
+        stripped = line.strip()
+        if "executive summary" in stripped.lower():
+            content = stripped.split(":", 1)[1].strip() if ":" in stripped else ""
+            if content:
+                summary_parts.append(content)
+            capturing = True
+            continue
+        if capturing:
+            if stripped.startswith("**") or (not stripped and summary_parts):
+                break
+            if stripped:
+                summary_parts.append(stripped)
+    executive_summary = " ".join(summary_parts)[:500]
+
+    # Extract news summary from the news report
+    news_summary = final_state.get("news_report", "")[:800]
+
+    return {
+        "rating": rating,
+        "executive_summary": executive_summary,
+        "news_summary": news_summary,
+    }
 
 
 def extract_thesis_oneliner(final_trade_decision: str) -> str:
