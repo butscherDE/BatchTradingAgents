@@ -2351,43 +2351,51 @@ def paper(
     console.print(Panel(Markdown(merge_report), title="Cross-Ticker Comparison", border_style="green"))
 
     # --- Prune watchlist recommendations ---
-    if prune_watchlist and trade_plan is not None and allocation_plan is not None:
-        from cli.prune import generate_prune_recommendations
-        from tradingagents.llm_clients import create_llm_client as _create_prune_llm
-
-        # Collect per-ticker ratings
-        ticker_ratings = {t: d for t, d, _ in completed_states}
-
-        # Determine tickers that MUST be kept (currently held or buy orders)
-        held_tickers = set(portfolio.holdings.keys())
-        buy_order_tickers = {o.symbol for o in trade_plan.orders if o.side == "buy"}
-        keep_tickers = held_tickers | buy_order_tickers
-
-        _prune_client = _create_prune_llm(
-            provider=config["llm_provider"],
-            model=config["deep_think_llm"],
-            base_url=config.get("backend_url"),
-        )
-
-        prune_result = generate_prune_recommendations(
-            llm=_prune_client.get_llm(),
-            watchlist_tickers=all_tickers,
-            allocation_plan=allocation_plan,
-            merge_report=merge_report,
-            ticker_ratings=ticker_ratings,
-            keep_tickers=keep_tickers,
-        )
-
-        if prune_result:
-            prune_table = Table(title="Watchlist Prune Recommendations", box=box.ROUNDED, header_style="bold magenta")
-            prune_table.add_column("Symbol", style="cyan")
-            prune_table.add_column("Reason")
-            for sym, reason in prune_result:
-                prune_table.add_row(sym, reason)
-            console.print()
-            console.print(prune_table)
+    if prune_watchlist:
+        if trade_plan is None or allocation_plan is None:
+            console.print("[yellow]Cannot prune watchlist — allocation plan not available.[/yellow]")
         else:
-            console.print("\n[green]No watchlist removals recommended — all tickers have near-term relevance.[/green]")
+            from cli.prune import generate_prune_recommendations
+            from tradingagents.llm_clients import create_llm_client as _create_prune_llm
+
+            # Collect per-ticker ratings
+            ticker_ratings = {t: d for t, d, _ in completed_states}
+
+            # Determine tickers that MUST be kept (currently held or buy orders)
+            held_tickers = set(portfolio.holdings.keys())
+            buy_order_tickers = {o.symbol for o in trade_plan.orders if o.side == "buy"}
+            keep_tickers = held_tickers | buy_order_tickers
+
+            _prune_client = _create_prune_llm(
+                provider=config["llm_provider"],
+                model=config["deep_think_llm"],
+                base_url=config.get("backend_url"),
+            )
+
+            console.print("\n[cyan]Analyzing watchlist for pruning recommendations...[/cyan]")
+            try:
+                with console.status("Running watchlist prune analysis...", spinner="dots"):
+                    prune_result = generate_prune_recommendations(
+                        llm=_prune_client.get_llm(),
+                        watchlist_tickers=all_tickers,
+                        allocation_plan=allocation_plan,
+                        merge_report=merge_report,
+                        ticker_ratings=ticker_ratings,
+                        keep_tickers=keep_tickers,
+                    )
+
+                if prune_result:
+                    prune_table = Table(title="Watchlist Prune Recommendations", box=box.ROUNDED, header_style="bold magenta")
+                    prune_table.add_column("Symbol", style="cyan")
+                    prune_table.add_column("Reason")
+                    for sym, reason in prune_result:
+                        prune_table.add_row(sym, reason)
+                    console.print()
+                    console.print(prune_table)
+                else:
+                    console.print("\n[green]No watchlist removals recommended — all tickers have near-term relevance.[/green]")
+            except Exception as e:
+                console.print(f"\n[red]Watchlist prune failed: {e}[/red]")
 
     if trade_plan is None:
         console.print(f"[red]Trade plan generation failed: {trade_plan_error or 'unknown error'}[/red]")
