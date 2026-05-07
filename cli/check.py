@@ -48,8 +48,6 @@ def run_numeric_checks(
     portfolio_value: float,
     previous_portfolio_value: Optional[float],
     strategy: str = "balanced",
-    concentration_warn_pct: float = 35.0,
-    concentration_crit_pct: float = 50.0,
     intraday_warn_pct: float = 5.0,
     intraday_crit_pct: float = 10.0,
     portfolio_drawdown_warn_pct: float = 5.0,
@@ -59,6 +57,8 @@ def run_numeric_checks(
     thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
     stop_warn = thresholds["warning_pct"]
     stop_crit = thresholds["critical_pct"]
+    concentration_warn_pct = thresholds.get("concentration_warn_pct", 35.0)
+    concentration_crit_pct = thresholds.get("concentration_crit_pct", 50.0)
 
     for sym, details in position_details.items():
         entry = details.get("avg_entry_price")
@@ -135,16 +135,19 @@ def validate_thesis_against_news(
     previous_thesis: str,
     headlines: list[str],
 ) -> tuple[bool, str]:
-    """Quick LLM call: does the news invalidate the prior thesis?
+    """Quick LLM call: does the news materially change the prior thesis?
 
-    Returns (invalidated: bool, explanation: str).
+    Detects both invalidation (bearish news on a bullish thesis) and
+    new opportunities (bullish news on a bearish/hold thesis).
+
+    Returns (should_reanalyze: bool, explanation: str).
     """
     if not headlines:
         return False, "No recent news"
 
     headlines_str = "\n".join(f"  - {h}" for h in headlines)
 
-    prompt = f"""You are a portfolio risk monitor. Given the previous investment thesis and recent news headlines, determine if any headline materially invalidates the thesis.
+    prompt = f"""You are a portfolio monitor. Given the previous investment thesis and recent news headlines, determine if any headline represents a MATERIAL CHANGE that warrants re-analysis of this ticker.
 
 **Ticker:** {ticker}
 
@@ -154,23 +157,28 @@ def validate_thesis_against_news(
 **Recent headlines:**
 {headlines_str}
 
-Answer in this exact format:
-INVALIDATED: YES or NO
-REASON: one sentence explanation
+A material change includes:
+- News that INVALIDATES a bullish thesis (earnings miss, regulatory rejection, fraud, key contract loss, guidance cut)
+- News that creates a NEW OPPORTUNITY for a bearish/hold-rated ticker (surprise earnings beat, FDA approval, major partnership, activist investor, buyout rumor)
+- Significant sector-wide events that fundamentally change the outlook
 
-Only answer YES if a headline represents a material change that directly contradicts or undermines the thesis (earnings miss, regulatory rejection, fraud allegation, bankruptcy, loss of key contract, etc.). General market noise is NOT invalidation."""
+General market noise, minor price moves, or analyst opinion changes are NOT material.
+
+Answer in this exact format:
+REANALYZE: YES or NO
+REASON: one sentence explanation"""
 
     response = llm.invoke(prompt)
     text = response.content.strip()
 
-    invalidated = "INVALIDATED: YES" in text.upper()
+    should_reanalyze = "REANALYZE: YES" in text.upper()
     reason_line = ""
     for line in text.splitlines():
         if line.upper().startswith("REASON:"):
             reason_line = line.split(":", 1)[1].strip()
             break
 
-    return invalidated, reason_line or text[:100]
+    return should_reanalyze, reason_line or text[:100]
 
 
 def extract_thesis_oneliner(final_trade_decision: str) -> str:

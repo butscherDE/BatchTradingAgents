@@ -5,6 +5,8 @@ STRATEGY_THRESHOLDS = {
     "conservative": {
         "warning_pct": 15,
         "critical_pct": 25,
+        "concentration_warn_pct": 25,
+        "concentration_crit_pct": 40,
         "instruction": (
             "Positions with >15% drawdown from entry are strong sell signals — exit unless "
             "the analyst case presents an imminent, specific recovery catalyst with a clear timeline. "
@@ -14,6 +16,8 @@ STRATEGY_THRESHOLDS = {
     "balanced": {
         "warning_pct": 20,
         "critical_pct": 35,
+        "concentration_warn_pct": 35,
+        "concentration_crit_pct": 50,
         "instruction": (
             "Positions with >20% drawdown from entry are sell signals — reduce or exit unless "
             "the analyst report explicitly justifies holding through with a strong thesis. "
@@ -23,6 +27,8 @@ STRATEGY_THRESHOLDS = {
     "aggressive": {
         "warning_pct": 35,
         "critical_pct": 50,
+        "concentration_warn_pct": 50,
+        "concentration_crit_pct": 70,
         "instruction": (
             "Drawdowns below 35% are acceptable volatility for this strategy. "
             "Only flag as a sell signal if the drawdown exceeds 35% AND the underlying thesis "
@@ -32,6 +38,8 @@ STRATEGY_THRESHOLDS = {
     "yolo": {
         "warning_pct": 50,
         "critical_pct": 70,
+        "concentration_warn_pct": 70,
+        "concentration_crit_pct": 90,
         "instruction": (
             "Drawdowns are context only — a large drawdown on a pre-catalyst name may be an add "
             "opportunity, not a sell signal. Only recommend exit if the underlying thesis has "
@@ -42,6 +50,8 @@ STRATEGY_THRESHOLDS = {
     "mean": {
         "warning_pct": 30,
         "critical_pct": 45,
+        "concentration_warn_pct": 40,
+        "concentration_crit_pct": 60,
         "instruction": (
             "These positions are tied to macro policy tailwinds (defense spending, deregulation, "
             "fossil fuel subsidies). A drawdown >30% may signal the political thesis is weakening — "

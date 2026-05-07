@@ -17,6 +17,7 @@ class PipelineStatus:
 
     total_tickers: int = 0
     completed_tickers: int = 0
+    skipped_tickers: int = 0
 
     merge_total: int = 1
     merge_completed: int = 0
@@ -57,6 +58,10 @@ class PipelineStatus:
     def mark_ticker_failed(self, ticker, error=""):
         self.ticker_states[ticker] = "failed"
         self._append_output(f"{ticker} — FAILED: {error[:80]}")
+
+    def mark_ticker_skipped(self, ticker):
+        self.ticker_states[ticker] = "skipped"
+        self.skipped_tickers += 1
 
     def start_merge(self):
         self.current_phase = "merge"
@@ -145,6 +150,7 @@ def _build_ticker_line(status: PipelineStatus, max_width: int = 100) -> Text:
         "reused": "cyan",
         "active": "bold orange3",
         "failed": "red",
+        "skipped": "purple",
         "pending": "dim",
     }
 
@@ -209,6 +215,8 @@ class _LiveStatusRenderable:
         ticker_line = _build_ticker_line(status, max_width=options.max_width - 12)
 
         phase_parts = [f"Tickers ({status.completed_tickers}/{status.total_tickers})"]
+        if status.skipped_tickers > 0:
+            phase_parts.append(f"Skipped ({status.skipped_tickers})")
         phase_parts.append(f"Merge ({status.merge_completed}/{status.merge_total})")
         if status.show_allocation:
             phase_parts.append(f"Alloc ({status.alloc_completed}/{status.alloc_total})")

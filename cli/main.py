@@ -1922,6 +1922,10 @@ def paper(
         "full", "--update-strategy", "-u",
         help="Analysis depth: skip (use existing reports), numeric (re-analyze on price alerts), headlines (+ news validation), escalate (+ re-analyze red-flagged), full (re-analyze all)",
     ),
+    update_candidates: str = typer.Option(
+        "all", "--update-candidates",
+        help="Which tickers to evaluate for re-analysis: all (every ticker in the run), held (only current holdings)",
+    ),
     strategy: str = typer.Option(
         "balanced", "--strategy", "-s",
         help="Investment risk strategy: conservative, balanced, aggressive, yolo",
@@ -2119,6 +2123,9 @@ def paper(
                 validate_thesis_against_news, extract_thesis_oneliner,
             )
 
+            # Determine which tickers are candidates for the update checks
+            candidates = set(all_tickers) if update_candidates.lower() == "all" else set(portfolio.holdings.keys())
+
             # Tickers without a usable existing report must always be analyzed
             for sym in all_tickers:
                 report_dir = _find_latest_report_dir(output_dir, sym)
@@ -2129,6 +2136,7 @@ def paper(
                     if not state.get("final_trade_decision"):
                         tickers_to_analyze.add(sym)
 
+            # Numeric checks (stop-loss, concentration) — only for held positions
             check_result = run_numeric_checks(
                 position_details=position_details,
                 current_prices={**position_prices, **quotes},
@@ -2140,8 +2148,10 @@ def paper(
                 strategy=strategy.lower(),
             )
 
+            # Headline validation — for ALL candidates (not just held)
             if us in ("headlines", "escalate"):
-                news_headlines = fetch_news_headlines(api_key, api_secret, all_tickers)
+                candidate_tickers_for_news = [t for t in all_tickers if t in candidates]
+                news_headlines = fetch_news_headlines(api_key, api_secret, candidate_tickers_for_news)
                 from tradingagents.llm_clients import create_llm_client as _create_check_llm
                 _check_client = _create_check_llm(
                     provider=config["llm_provider"],
@@ -2150,7 +2160,7 @@ def paper(
                 )
                 _check_llm = _check_client.get_llm()
 
-                for sym in all_tickers:
+                for sym in candidate_tickers_for_news:
                     sym_headlines = news_headlines.get(sym, [])
                     if not sym_headlines:
                         continue
@@ -2164,7 +2174,7 @@ def paper(
                     thesis = extract_thesis_oneliner(ftd)
                     invalidated, reason = validate_thesis_against_news(_check_llm, sym, thesis, sym_headlines)
                     if invalidated:
-                        check_result.add_alert(sym, "red", f"thesis invalidated: {reason}")
+                        check_result.add_alert(sym, "red", f"material change: {reason}")
 
             # Determine flagged tickers (union with already-flagged missing-report tickers)
             if us == "numeric":
@@ -2174,8 +2184,18 @@ def paper(
             elif us == "escalate":
                 tickers_to_analyze |= {a.symbol for a in check_result.alerts if a.level in ("red", "yellow")}
 
+            # Report flagged tickers with reasons
             if tickers_to_analyze:
-                pipeline._append_output(f"Health check flagged: {', '.join(sorted(tickers_to_analyze))}")
+                flagged_reasons = []
+                for a in check_result.alerts:
+                    if a.symbol in tickers_to_analyze and a.reasons:
+                        flagged_reasons.append(f"{a.symbol}: {a.reasons[0]}")
+                # Tickers flagged for missing reports
+                for sym in tickers_to_analyze:
+                    if not any(a.symbol == sym for a in check_result.alerts if a.reasons):
+                        flagged_reasons.append(f"{sym}: no existing report")
+                for line in flagged_reasons:
+                    pipeline._append_output(line)
                 update_pipeline_display(pipeline_layout, pipeline)
 
         # Load existing reports for tickers we won't re-analyze
@@ -2212,7 +2232,10 @@ def paper(
                 decision = parse_rating(final_state["final_trade_decision"])
                 completed_states.append((ticker, decision, final_state))
                 summary = extract_report_summary(final_state["final_trade_decision"], ticker, decision)
-                pipeline.mark_ticker_reused(ticker, summary)
+                if us in ("numeric", "headlines", "escalate"):
+                    pipeline.mark_ticker_skipped(ticker)
+                else:
+                    pipeline.mark_ticker_reused(ticker, summary)
                 update_pipeline_display(pipeline_layout, pipeline)
                 continue
 
@@ -2786,7 +2809,7 @@ def check(
             invalidated, reason = validate_thesis_against_news(llm, sym, thesis, sym_headlines)
 
             if invalidated:
-                result.add_alert(sym, "red", f"thesis invalidated: {reason}")
+                result.add_alert(sym, "red", f"material change: {reason}")
 
     # --- determine which tickers to re-analyze ---
     flagged_tickers = []
