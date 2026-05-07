@@ -1,0 +1,41 @@
+# TradingAgents Watchlists
+# Comment out tickers with # to exclude them from a run.
+# Use `extends` to inherit from another section.
+# Use `exclude` to remove specific tickers inherited from the parent.
+
+[conservative]
+tickers = [
+    "VTI",
+    "BND",
+    "VNQ",
+    "AAPL",
+    "MSFT",
+]
+
+[aggressive]
+extends = "conservative"
+tickers = [
+    "NVDA",
+    "AVGO",
+    "VGT",
+    "TQQQ",
+    "SOXX",
+    "MU",
+]
+
+[yolo]
+extends = "aggressive"
+tickers = [
+    "NUVL",
+    "CYTK",
+    "SOXL",
+    "UPRO",
+    "ARKK",
+    "ARKW",
+    "MSTU",
+    "BITX",
+]
+exclude = [
+    "BND",
+    "VNQ",
+]
