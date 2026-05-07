@@ -129,19 +129,59 @@ def fetch_quotes(client, tickers: list[str]) -> dict[str, float]:
     return result
 
 
-def submit_orders(client, orders: list[dict]) -> list[dict]:
-    from alpaca.trading.requests import MarketOrderRequest
+def submit_orders(client, orders: list[dict], quotes: dict[str, float] = None) -> list[dict]:
+    from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
     from alpaca.trading.enums import OrderSide, TimeInForce
+
+    # Determine if market is open or in extended hours
+    clock = client.get_clock()
+    market_open = clock.is_open
+
+    # Extended hours: market is closed but we can still trade with limit orders
+    # Alpaca extended hours: pre-market 4:00-9:30 ET, after-hours 16:00-20:00 ET
+    # If market is closed, use limit orders with extended_hours=True
+    use_extended = not market_open
 
     results = []
     for order in orders:
         try:
-            req = MarketOrderRequest(
-                symbol=order["symbol"],
-                qty=order["qty"],
-                side=OrderSide.BUY if order["side"] == "buy" else OrderSide.SELL,
-                time_in_force=TimeInForce.DAY,
-            )
+            side = OrderSide.BUY if order["side"] == "buy" else OrderSide.SELL
+
+            if use_extended and quotes:
+                price = quotes.get(order["symbol"])
+                if price is None:
+                    results.append({
+                        "symbol": order["symbol"],
+                        "side": order["side"],
+                        "qty": order["qty"],
+                        "order_id": None,
+                        "status": "error",
+                        "error": "No quote available for extended-hours limit order",
+                    })
+                    continue
+
+                # Use a slight buffer: buy slightly above ask, sell slightly below bid
+                if order["side"] == "buy":
+                    limit_price = round(price * 1.005, 2)
+                else:
+                    limit_price = round(price * 0.995, 2)
+
+                req = LimitOrderRequest(
+                    symbol=order["symbol"],
+                    qty=order["qty"],
+                    side=side,
+                    time_in_force=TimeInForce.DAY,
+                    limit_price=limit_price,
+                    extended_hours=True,
+                )
+            else:
+                req = MarketOrderRequest(
+                    symbol=order["symbol"],
+                    qty=order["qty"],
+                    side=side,
+                    time_in_force=TimeInForce.DAY,
+                )
+
             response = client.submit_order(req)
             results.append({
                 "symbol": order["symbol"],
@@ -150,6 +190,7 @@ def submit_orders(client, orders: list[dict]) -> list[dict]:
                 "order_id": str(response.id),
                 "status": response.status.value,
                 "error": None,
+                "extended_hours": use_extended,
             })
         except Exception as e:
             results.append({

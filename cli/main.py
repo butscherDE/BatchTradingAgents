@@ -2583,9 +2583,15 @@ def paper(
 
     trade_plan = chat_ctx.trade_plan  # may have been edited via /propose
 
+    # Check market status and inform user
+    clock = client.get_clock()
+    if not clock.is_open:
+        console.print("[yellow]Market is closed — submitting limit orders for extended hours trading.[/yellow]")
+
     console.print(f"\n[bold cyan]Submitting {len(trade_plan.orders)} order(s) to Alpaca ({mode})...[/bold cyan]")
     order_dicts = [{"symbol": o.symbol, "side": o.side, "qty": int(o.qty)} for o in trade_plan.orders]
-    exec_results = submit_orders(client, order_dicts)
+    all_quotes = {**position_prices, **quotes}
+    exec_results = submit_orders(client, order_dicts, quotes=all_quotes)
 
     exec_table = Table(
         title="Execution Results",
