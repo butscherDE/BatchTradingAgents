@@ -1645,6 +1645,14 @@ def batch(
         "none", "--continuity",
         help="Report continuity mode: none, anchored (feed previous report into analysis), reconcile (compare new merge to previous and correct unjustified changes)",
     ),
+    watchlist: Optional[str] = typer.Option(
+        None, "--watchlist", "-w",
+        help="Named watchlist section from watchlists.toml",
+    ),
+    watchlist_file: Optional[Path] = typer.Option(
+        None, "--watchlist-file",
+        help="Path to watchlists.toml (default: ./watchlists.toml or ~/.tradingagents/watchlists.toml)",
+    ),
 ):
     """Analyze multiple tickers sequentially with fixed parameters."""
     from cli.portfolio import load_portfolio
@@ -1655,6 +1663,17 @@ def batch(
         cash=cash,
         format_override=portfolio_format,
     )
+
+    # Load watchlist tickers if specified
+    if watchlist:
+        from cli.watchlist import load_watchlist
+        wl_tickers = load_watchlist(watchlist, path=watchlist_file)
+        console.print(f"[cyan]Watchlist '{watchlist}': {len(wl_tickers)} tickers[/cyan]")
+        existing = [normalize_ticker_symbol(t) for t in tickers] if tickers else []
+        for t in wl_tickers:
+            if t not in existing:
+                existing.append(t)
+        tickers = existing or None
 
     if not tickers:
         if portfolio and portfolio.holdings:
@@ -1935,6 +1954,14 @@ def paper(
         "none", "--continuity",
         help="Report continuity mode: none, anchored, reconcile",
     ),
+    watchlist: Optional[str] = typer.Option(
+        None, "--watchlist", "-w",
+        help="Named watchlist section from watchlists.toml",
+    ),
+    watchlist_file: Optional[Path] = typer.Option(
+        None, "--watchlist-file",
+        help="Path to watchlists.toml (default: ./watchlists.toml or ~/.tradingagents/watchlists.toml)",
+    ),
 ):
     """Connect to Alpaca, analyze portfolio + extra tickers, and auto-execute trades."""
     from cli.alpaca_client import (
@@ -1978,6 +2005,16 @@ def paper(
     ))
 
     extra_tickers = [normalize_ticker_symbol(t) for t in tickers] if tickers else []
+
+    # Merge watchlist tickers
+    if watchlist:
+        from cli.watchlist import load_watchlist
+        wl_tickers = load_watchlist(watchlist, path=watchlist_file)
+        console.print(f"[cyan]Watchlist '{watchlist}': {len(wl_tickers)} tickers[/cyan]")
+        for t in wl_tickers:
+            if t not in extra_tickers:
+                extra_tickers.append(t)
+
     all_tickers = list(portfolio.ticker_symbols())
     for o in pending:
         sym = o["symbol"]
@@ -2571,6 +2608,14 @@ def check(
         False, "--quiet", "-q",
         help="Minimal output; exit code 0=clear, 1=alerts",
     ),
+    watchlist: Optional[str] = typer.Option(
+        None, "--watchlist", "-w",
+        help="Named watchlist section from watchlists.toml",
+    ),
+    watchlist_file: Optional[Path] = typer.Option(
+        None, "--watchlist-file",
+        help="Path to watchlists.toml (default: ./watchlists.toml or ~/.tradingagents/watchlists.toml)",
+    ),
 ):
     """Lightweight portfolio health check without full analysis."""
     from cli.alpaca_client import create_client, fetch_portfolio, resolve_credentials
@@ -2588,6 +2633,13 @@ def check(
     if tickers:
         extra = [normalize_ticker_symbol(t) for t in tickers]
         for t in extra:
+            if t not in all_tickers:
+                all_tickers.append(t)
+
+    if watchlist:
+        from cli.watchlist import load_watchlist
+        wl_tickers = load_watchlist(watchlist, path=watchlist_file)
+        for t in wl_tickers:
             if t not in all_tickers:
                 all_tickers.append(t)
 

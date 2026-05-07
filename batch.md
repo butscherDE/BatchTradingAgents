@@ -4,6 +4,63 @@ All commands are run via `uv run python -m cli.main` (or `tradingagents` if inst
 
 ---
 
+## Watchlists
+
+Manage ticker lists in `watchlists.toml` (searched at `./watchlists.toml` then `~/.tradingagents/watchlists.toml`).
+
+```toml
+[conservative]
+tickers = [
+    "VTI",
+    "BND",
+    "VNQ",
+    "AAPL",
+    "MSFT",
+]
+
+[aggressive]
+extends = "conservative"   # inherits all conservative tickers
+tickers = [                # adds these on top
+    "NVDA",
+    "TQQQ",
+    "SOXL",
+]
+exclude = ["BND"]          # removes BND from the inherited set
+
+[yolo]
+extends = "aggressive"
+tickers = ["NUVL", "CYTK", "ARKK"]
+exclude = ["VTI", "VNQ"]
+```
+
+Use `--watchlist` / `-w` with any command:
+
+```bash
+# Use a named watchlist
+tradingagents batch -w yolo
+tradingagents paper -w aggressive
+tradingagents check -w conservative
+
+# Watchlist + extra tickers on top
+tradingagents paper -w yolo SILJ FCX
+
+# Custom file location
+tradingagents batch -w yolo --watchlist-file ~/my_lists.toml
+```
+
+Comment out tickers with `#` to temporarily exclude them:
+
+```toml
+[yolo]
+tickers = [
+    "NVDA",
+    # "DFTX",   # delisted
+    "NUVL",
+]
+```
+
+---
+
 ## `batch` — Multi-Ticker Analysis
 
 Analyze multiple tickers sequentially, generate per-ticker reports and a cross-ticker comparison.
@@ -121,6 +178,8 @@ tradingagents batch LMT RTX XOM GEO PLTR -s mean
 | `--reuse-today` | | `false` | Skip analysis for tickers with a report from today |
 | `--merge-checks` | | `0` | Validation passes on the merge report |
 | `--continuity` | | `none` | Report continuity: `none`, `anchored`, `reconcile` |
+| `--watchlist` | `-w` | | Named watchlist section from `watchlists.toml` |
+| `--watchlist-file` | | *(auto)* | Path to watchlists TOML file |
 | `--portfolio` | | | CSV file with holdings (E\*Trade or generic) |
 | `--position` | | | Inline position as `TICKER:QUANTITY` (repeatable) |
 | `--cash` | | `0.0` | Cash available for allocation |
@@ -306,6 +365,8 @@ Holding period is determined from Alpaca order history (earliest filled buy orde
 | `--tax-bracket` | | `top` | Tax bracket: `top`, `mid`, `low`, `none` |
 | `--no-stop-loss` | | `false` | Disable position drawdown guidance in merge/allocation prompts |
 | `--continuity` | | `none` | Report continuity: `none`, `anchored`, `reconcile` |
+| `--watchlist` | `-w` | | Named watchlist section from `watchlists.toml` |
+| `--watchlist-file` | | *(auto)* | Path to watchlists TOML file |
 
 ---
 
@@ -408,6 +469,8 @@ For each ticker with a previous report on disk, fetches recent news via Alpaca N
 | `--quick-model` | | `qwen3:8b` | Model for headline validation |
 | `--deep-model` | | `qwen3:32b` | Model for escalated re-analysis |
 | `--quiet` | `-q` | `false` | Minimal output; exit 0=clear, 1=alerts |
+| `--watchlist` | `-w` | | Named watchlist section from `watchlists.toml` |
+| `--watchlist-file` | | *(auto)* | Path to watchlists TOML file |
 
 ---
 
