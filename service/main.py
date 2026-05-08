@@ -54,6 +54,8 @@ def main():
         host=config.host,
         port=config.port,
         log_level="info",
+        ws_ping_interval=20,
+        ws_ping_timeout=20,
     )
 
 
