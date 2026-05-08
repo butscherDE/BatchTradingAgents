@@ -221,5 +221,8 @@ __marimo__/
 # Reporting
 reports/
 
+# Service runtime data
+data/
+
 # Claude
 .claude/
