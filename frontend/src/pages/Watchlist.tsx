@@ -3,6 +3,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc } from '../api/time'
+import TickerSearch from '../components/TickerSearch'
 
 interface WatchlistTicker {
   id: number
@@ -20,7 +21,6 @@ interface WatchlistConfig {
 }
 
 export default function Watchlist() {
-  const [newSymbol, setNewSymbol] = useState('')
   const [showInactive, setShowInactive] = useState(false)
   const queryClient = useQueryClient()
   const { lastMessage } = useWebSocket()
@@ -89,15 +89,10 @@ export default function Watchlist() {
       </div>
 
       <div className="filters" style={{ marginBottom: 16 }}>
-        <form onSubmit={e => { e.preventDefault(); if (newSymbol.trim()) addMutation.mutate(newSymbol.trim().toUpperCase()) }}>
-          <input
-            placeholder="Add ticker..."
-            value={newSymbol}
-            onChange={e => setNewSymbol(e.target.value)}
-            style={{ width: 120 }}
-          />
-          <button type="submit" style={{ marginLeft: 8 }}>Add</button>
-        </form>
+        <TickerSearch
+          onSelect={(symbol) => addMutation.mutate(symbol)}
+          disabled={addMutation.isPending}
+        />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, fontSize: 13, color: 'var(--text-dim)' }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show removed

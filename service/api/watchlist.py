@@ -140,6 +140,14 @@ async def get_watchlist_config():
     }
 
 
+@router.get("/search")
+async def search_tickers(q: str = Query(min_length=1)):
+    """Search for tickers by symbol or company name with live price data."""
+    import asyncio
+    results = await asyncio.to_thread(_search_tickers, q)
+    return results
+
+
 def _validate_ticker(symbol: str) -> bool:
     """Check if a ticker is a valid tradeable asset on Alpaca."""
     from service.app import _config
@@ -155,3 +163,95 @@ def _validate_ticker(symbol: str) -> bool:
         return asset.tradable
     except Exception:
         return False
+
+
+def _search_tickers(query: str) -> list[dict]:
+    """Search Alpaca assets by symbol or name, return with live quotes."""
+    from service.app import _config
+
+    if not _config or not _config.accounts:
+        return []
+
+    acct = next(iter(_config.accounts.values()))
+
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import SearchAssetsRequest
+
+    client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
+
+    query_upper = query.upper().strip()
+
+    # Search by getting all assets and filtering (Alpaca doesn't have a search endpoint)
+    # Use get_asset for exact match first, then fall back to listing
+    results = []
+
+    # Try exact symbol match
+    try:
+        asset = client.get_asset(query_upper)
+        if asset.tradable:
+            results.append({
+                "symbol": asset.symbol,
+                "name": asset.name,
+            })
+    except Exception:
+        pass
+
+    # Search through active assets for partial matches
+    if len(results) < 8:
+        try:
+            from alpaca.trading.enums import AssetStatus
+            assets = client.get_all_assets(
+                filter=SearchAssetsRequest(status=AssetStatus.ACTIVE)
+            )
+            q_lower = query.lower()
+            for asset in assets:
+                if not asset.tradable:
+                    continue
+                if len(results) >= 8:
+                    break
+                sym = asset.symbol or ""
+                name = asset.name or ""
+                if (q_lower in sym.lower() or q_lower in name.lower()) and sym not in [r["symbol"] for r in results]:
+                    results.append({
+                        "symbol": sym,
+                        "name": name,
+                    })
+        except Exception:
+            pass
+
+    if not results:
+        return []
+
+    # Fetch live quotes for the results
+    try:
+        from alpaca.data.historical import StockHistoricalDataClient
+        from alpaca.data.requests import StockLatestQuoteRequest, StockSnapshotRequest
+
+        data_client = StockHistoricalDataClient(acct.api_key, acct.api_secret)
+        symbols = [r["symbol"] for r in results]
+
+        snapshots = data_client.get_stock_snapshot(
+            StockSnapshotRequest(symbol_or_symbols=symbols)
+        )
+
+        for r in results:
+            snap = snapshots.get(r["symbol"])
+            if snap and snap.daily_bar:
+                price = snap.latest_trade.price if snap.latest_trade else snap.daily_bar.close
+                prev_close = snap.previous_daily_bar.close if snap.previous_daily_bar else snap.daily_bar.open
+                day_change = price - prev_close if prev_close else 0
+                day_change_pct = (day_change / prev_close * 100) if prev_close else 0
+                r["price"] = float(price)
+                r["day_change"] = float(day_change)
+                r["day_change_pct"] = float(day_change_pct)
+            else:
+                r["price"] = None
+                r["day_change"] = None
+                r["day_change_pct"] = None
+    except Exception:
+        for r in results:
+            r.setdefault("price", None)
+            r.setdefault("day_change", None)
+            r.setdefault("day_change_pct", None)
+
+    return results
