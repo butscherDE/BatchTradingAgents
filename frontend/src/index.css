@@ -54,6 +54,26 @@ body {
 .sidebar a:hover { background: var(--border); }
 .sidebar a.active { color: var(--accent); background: var(--border); }
 
+.nav-with-badge {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.nav-badge {
+  background: var(--red);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
 .content {
   flex: 1;
   overflow-y: auto;
