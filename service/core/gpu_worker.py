@@ -157,12 +157,78 @@ class GpuWorker:
         )
 
     def _full_analysis(self, payload: dict) -> dict:
-        # Phase 2: will call TradingAgentsGraph.propagate()
-        return {"status": "not_implemented", "message": "Full analysis (Phase 2)"}
+        from shared.analysis import run_single_ticker
+        from shared.config import build_graph_config
+
+        ticker = payload["ticker"]
+        config = build_graph_config(
+            provider="ollama",
+            quick_model=self.config.gpu.quick_model,
+            deep_model=self.config.gpu.deep_model,
+            backend_url=self.config.gpu.ollama_url,
+        )
+
+        result = run_single_ticker(
+            ticker=ticker,
+            config=config,
+            past_context=payload.get("past_context", ""),
+        )
+
+        return {
+            "ticker": ticker,
+            "decision": result["decision"],
+            "final_state": {
+                "final_trade_decision": result["final_state"].get("final_trade_decision", ""),
+                "market_report": result["final_state"].get("market_report", ""),
+                "news_report": result["final_state"].get("news_report", ""),
+                "sentiment_report": result["final_state"].get("sentiment_report", ""),
+                "fundamentals_report": result["final_state"].get("fundamentals_report", ""),
+            },
+            "elapsed": result["elapsed"],
+            "stats": result["stats"],
+        }
 
     def _merge_and_allocate(self, payload: dict) -> dict:
-        # Phase 2: will call shared merge + allocation logic
-        return {"status": "not_implemented", "message": "Merge and allocate (Phase 2)"}
+        from shared.merge import generate_merge_report, validate_merge_report
+        from shared.config import build_graph_config
+
+        tickers_data = payload["tickers_data"]  # list of {ticker, decision, final_state}
+        account_id = payload.get("account_id")
+        strategy = payload.get("strategy", "balanced")
+        portfolio = payload.get("portfolio")
+
+        config = build_graph_config(
+            provider="ollama",
+            quick_model=self.config.gpu.quick_model,
+            deep_model=self.config.gpu.deep_model,
+            backend_url=self.config.gpu.ollama_url,
+        )
+
+        ticker_results = [
+            (t["ticker"], t["decision"], t["final_state"])
+            for t in tickers_data
+        ]
+
+        merge_report = generate_merge_report(
+            ticker_results=ticker_results,
+            config=config,
+            portfolio=portfolio,
+            strategy=strategy,
+        )
+
+        validated_report = validate_merge_report(
+            merge_report=merge_report,
+            ticker_results=ticker_results,
+            config=config,
+            strategy=strategy,
+            portfolio=portfolio,
+        )
+
+        return {
+            "account_id": account_id,
+            "merge_report": validated_report,
+            "tickers": [t["ticker"] for t in tickers_data],
+        }
 
     def _publish_status(self, state: str, message: str):
         status = {
