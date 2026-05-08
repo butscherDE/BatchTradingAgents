@@ -39,15 +39,29 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def _seed_watchlist(tickers: list[str]):
-    """Seed watchlist from config on first run (only adds, never removes)."""
-    if not tickers:
-        return
+async def _seed_watchlist(config_tickers: list[str]):
+    """Seed watchlist from config tickers + watchlists.toml (only adds, never removes)."""
     from service.db.models import WatchlistTicker
     from sqlalchemy import select
+
+    # Collect tickers from config
+    all_tickers = set(t.upper().strip() for t in config_tickers if t.strip())
+
+    # Also load from watchlists.toml if accounts reference a watchlist name
+    try:
+        from cli.watchlist import load_watchlist
+        for acct in (_config.accounts.values() if _config else []):
+            if acct.watchlist:
+                wl_tickers = load_watchlist(acct.watchlist)
+                all_tickers.update(t.upper() for t in wl_tickers)
+    except Exception:
+        pass
+
+    if not all_tickers:
+        return
+
     async with get_db_session() as session:
-        for symbol in tickers:
-            sym = symbol.upper().strip()
+        for sym in sorted(all_tickers):
             existing = await session.execute(
                 select(WatchlistTicker).where(WatchlistTicker.symbol == sym)
             )
