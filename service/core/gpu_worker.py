@@ -271,6 +271,16 @@ class GpuWorker:
             "account_id": account_id,
             "merge_report": validated_report,
             "tickers": [t["ticker"] for t in tickers_data],
+            "ticker_data": [
+                {
+                    "ticker": t["ticker"],
+                    "decision": t["decision"],
+                    "reasoning": t["final_state"].get("final_trade_decision", "")[:500],
+                }
+                for t in tickers_data
+            ],
+            "strategy": strategy,
+            "proposed_orders": [],  # TODO: extract structured orders from merge report
         }
 
     def _publish_status(self, state: str, message: str):

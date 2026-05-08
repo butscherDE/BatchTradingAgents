@@ -86,3 +86,28 @@ class WatchlistTicker(Base):
     removed_at = Column(DateTime, nullable=True)
     remove_reason = Column(Text, nullable=True)
     active = Column(Integer, nullable=False, default=1)  # 1=active, 0=pruned
+
+
+class ProposalStatus(str, enum.Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+    superseded = "superseded"
+
+
+class TradeProposal(Base):
+    __tablename__ = "trade_proposals"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String, nullable=False, index=True)
+    strategy = Column(String, nullable=False)
+    status = Column(Enum(ProposalStatus), nullable=False, default=ProposalStatus.pending, index=True)
+    merge_report = Column(Text, nullable=False)
+    tickers = Column(JSON, nullable=False)
+    ticker_data = Column(JSON, nullable=False)
+    proposed_orders = Column(JSON, nullable=True)
+    source_task_id = Column(String, nullable=True)
+    superseded_by = Column(Integer, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    decided_at = Column(DateTime, nullable=True)
+    execution_results = Column(JSON, nullable=True)

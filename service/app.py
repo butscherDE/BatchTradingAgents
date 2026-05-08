@@ -495,18 +495,68 @@ async def _handle_analysis_result(data: dict):
 
 
 async def _handle_merge_result(data: dict):
-    """Process a completed merge+allocation."""
+    """Process a completed merge+allocation — create a trade proposal."""
     from service.api.ws import broadcast
+    from service.db.models import TradeProposal, ProposalStatus
+    from sqlalchemy import select, update
 
     result = data.get("result", {})
     account_id = result.get("account_id")
     merge_report = result.get("merge_report", "")
     tickers = result.get("tickers", [])
+    ticker_data = result.get("ticker_data", [])
+    proposed_orders = result.get("proposed_orders", [])
+    strategy = result.get("strategy", "balanced")
+    task_id = data.get("task_id")
 
-    await broadcast("merge_complete", {
+    if not account_id or not merge_report:
+        return
+
+    async with get_db_session() as session:
+        # Supersede all pending proposals for this account
+        pending_result = await session.execute(
+            select(TradeProposal).where(
+                TradeProposal.account_id == account_id,
+                TradeProposal.status == ProposalStatus.pending,
+            )
+        )
+        old_proposals = pending_result.scalars().all()
+        old_ids = [p.id for p in old_proposals]
+
+        # Create new proposal
+        new_proposal = TradeProposal(
+            account_id=account_id,
+            strategy=strategy,
+            status=ProposalStatus.pending,
+            merge_report=merge_report,
+            tickers=tickers,
+            ticker_data=ticker_data,
+            proposed_orders=proposed_orders,
+            source_task_id=task_id,
+        )
+        session.add(new_proposal)
+        await session.flush()
+
+        # Mark old proposals as superseded
+        if old_ids:
+            await session.execute(
+                update(TradeProposal)
+                .where(TradeProposal.id.in_(old_ids))
+                .values(
+                    status=ProposalStatus.superseded,
+                    superseded_by=new_proposal.id,
+                )
+            )
+
+        await session.commit()
+        proposal_id = new_proposal.id
+
+    await broadcast("proposal_created", {
+        "proposal_id": proposal_id,
         "account_id": account_id,
+        "strategy": strategy,
         "tickers": tickers,
-        "report_length": len(merge_report),
+        "superseded_ids": old_ids,
     })
 
 
@@ -641,12 +691,14 @@ def create_app() -> FastAPI:
     from service.api.tasks import router as tasks_router
     from service.api.holdings import router as holdings_router
     from service.api.watchlist import router as watchlist_router
+    from service.api.proposals import router as proposals_router
     from service.api.ws import router as ws_router
 
     app.include_router(news_router)
     app.include_router(tasks_router)
     app.include_router(holdings_router)
     app.include_router(watchlist_router)
+    app.include_router(proposals_router)
     app.include_router(ws_router)
 
     @app.get("/")
