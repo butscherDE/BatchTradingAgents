@@ -1,10 +1,17 @@
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, TaskItem, TaskStats } from '../api/client'
+import { api, TaskItem, TaskStats, fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc, formatTime } from '../api/time'
 
 export default function Tasks() {
+  const [page, setPage] = useState(0)
+  const [statusFilter, setStatusFilter] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [tickerFilter, setTickerFilter] = useState('')
+  const [modelFilter, setModelFilter] = useState('')
+  const pageSize = 50
+
   const queryClient = useQueryClient()
   const { lastMessage, connected } = useWebSocket()
 
@@ -13,9 +20,22 @@ export default function Tasks() {
     queryFn: api.getTaskStats,
   })
 
+  const queryParams = new URLSearchParams()
+  queryParams.set('limit', String(pageSize))
+  queryParams.set('offset', String(page * pageSize))
+  if (statusFilter) queryParams.set('status', statusFilter)
+  if (modelFilter) queryParams.set('model_tier', modelFilter)
+
   const { data: tasks = [], isLoading } = useQuery({
-    queryKey: ['tasks'],
-    queryFn: () => api.getTasks({ limit: '100' }),
+    queryKey: ['tasks', page, statusFilter, typeFilter, tickerFilter, modelFilter],
+    queryFn: () => fetchJson<TaskItem[]>(`/api/tasks?${queryParams.toString()}`),
+  })
+
+  // Client-side filters for type and ticker (not in API yet)
+  const filtered = tasks.filter(t => {
+    if (typeFilter && t.task_type !== typeFilter) return false
+    if (tickerFilter && !(t.ticker || '').toLowerCase().includes(tickerFilter.toLowerCase())) return false
+    return true
   })
 
   useEffect(() => {
@@ -64,44 +84,97 @@ export default function Tasks() {
         </div>
       </div>
 
+      <div className="filters">
+        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}>
+          <option value="">All statuses</option>
+          <option value="queued">Queued</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+        </select>
+        <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(0) }}>
+          <option value="">All types</option>
+          <option value="news_screen">news_screen</option>
+          <option value="investigation">investigation</option>
+          <option value="full_analysis">full_analysis</option>
+          <option value="merge_and_allocate">merge_and_allocate</option>
+          <option value="watchlist_discovery">watchlist_discovery</option>
+        </select>
+        <select value={modelFilter} onChange={e => { setModelFilter(e.target.value); setPage(0) }}>
+          <option value="">All models</option>
+          <option value="quick">quick</option>
+          <option value="deep">deep</option>
+        </select>
+        <input
+          placeholder="Filter ticker..."
+          value={tickerFilter}
+          onChange={e => { setTickerFilter(e.target.value); setPage(0) }}
+          style={{ width: 100 }}
+        />
+      </div>
+
       {isLoading ? <p>Loading...</p> : (
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Type</th>
-              <th>Ticker</th>
-              <th>Model</th>
-              <th>Status</th>
-              <th>Duration</th>
-              <th>Error</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.map((t: TaskItem) => {
-              const duration = t.started_at && t.completed_at
-                ? ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
-                : t.started_at
-                  ? 'running...'
-                  : '—'
-              return (
-                <tr key={t.id}>
-                  <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
-                    {formatTime(t.created_at)}
-                  </td>
-                  <td>{t.task_type}</td>
-                  <td>{t.ticker ?? '—'}</td>
-                  <td>{t.model_tier}</td>
-                  <td><span className={`badge badge-${t.status}`}>{t.status}</span></td>
-                  <td>{duration}</td>
-                  <td style={{ color: 'var(--red)', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {t.error ?? ''}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
+        <>
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Type</th>
+                <th>Ticker</th>
+                <th>Model</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Error</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((t: TaskItem) => {
+                const duration = t.started_at && t.completed_at
+                  ? ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
+                  : t.started_at
+                    ? 'running...'
+                    : '—'
+                return (
+                  <tr key={t.id}>
+                    <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
+                      {formatTime(t.created_at)}
+                    </td>
+                    <td>{t.task_type}</td>
+                    <td>{t.ticker ?? '—'}</td>
+                    <td>{t.model_tier}</td>
+                    <td><span className={`badge badge-${t.status}`}>{t.status}</span></td>
+                    <td>{duration}</td>
+                    <td style={{ color: 'var(--red)', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {t.error ?? ''}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 13 }}>
+            <span style={{ color: 'var(--text-dim)' }}>
+              Page {page + 1} · Showing {filtered.length} tasks
+            </span>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={() => setPage(p => Math.max(0, p - 1))}
+                disabled={page === 0}
+                style={{ opacity: page === 0 ? 0.3 : 1 }}
+              >
+                ← Prev
+              </button>
+              <button
+                onClick={() => setPage(p => p + 1)}
+                disabled={tasks.length < pageSize}
+                style={{ opacity: tasks.length < pageSize ? 0.3 : 1 }}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   )
