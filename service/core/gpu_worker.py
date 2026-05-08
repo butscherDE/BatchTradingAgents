@@ -122,12 +122,14 @@ class GpuWorker:
                 "completed_at": datetime.datetime.utcnow().isoformat(),
             }))
         except Exception as e:
+            import traceback
+            error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
             self._redis.publish(RESULT_CHANNEL, json.dumps({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
                 "status": "failed",
-                "error": str(e),
+                "error": error_detail,
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
             }))

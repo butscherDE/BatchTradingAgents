@@ -170,7 +170,11 @@ async def _handle_news_article(article: dict):
             status=InvestigationStatus.queued,
         )
         session.add(db_article)
-        await session.commit()
+        try:
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            return  # Duplicate article, skip
         await session.refresh(db_article)
         article_id = db_article.id
 
