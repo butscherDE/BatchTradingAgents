@@ -84,3 +84,72 @@ def _parse_json_response(response: str, default_score: float = 0.0) -> dict:
         except json.JSONDecodeError:
             pass
     return {"score": default_score, "reasoning": text[:200], "parse_error": True}
+
+
+def evaluate_watchlist_addition(
+    headline: str,
+    summary: str,
+    symbol: str,
+    ollama_url: str,
+    model: str,
+) -> dict:
+    """Quick model: should this unwatched ticker be added to the watchlist?"""
+    prompt = f"""You are a watchlist curator for an active trading portfolio. A news article just came in for a ticker that is NOT currently on our watchlist.
+
+**Ticker:** {symbol}
+**Headline:** {headline}
+**Summary:** {summary or "(none)"}
+
+Should we ADD this ticker to our watchlist for further monitoring and potential investment?
+
+Add to watchlist if:
+- The news suggests a significant catalyst (earnings beat, M&A, FDA approval, major contract)
+- The ticker is in a sector we care about with a clear trading opportunity
+- There's a time-sensitive opportunity that warrants further analysis
+
+Do NOT add if:
+- It's routine news (analyst price target changes, minor upgrades/downgrades)
+- The ticker is in a sector with no clear edge
+- The news is negative with no contrarian opportunity
+
+Respond in JSON:
+{{"add": true|false, "reasoning": "<one sentence>"}}"""
+
+    response = _call_ollama(ollama_url, model, prompt)
+    return _parse_json_response(response, default_score=0.0)
+
+
+def evaluate_watchlist_prune(
+    symbol: str,
+    recent_headlines: list[str],
+    ollama_url: str,
+    model: str,
+) -> dict:
+    """Deep model: should this ticker be removed from the watchlist?"""
+    headlines_str = "\n".join(f"  - {h}" for h in recent_headlines) if recent_headlines else "(no recent news)"
+
+    prompt = f"""You are a watchlist curator reviewing whether a ticker should be REMOVED from active monitoring.
+
+**Ticker:** {symbol}
+**Recent Headlines:**
+{headlines_str}
+
+Should we REMOVE this ticker from the watchlist?
+
+Remove if:
+- No meaningful catalysts in sight
+- The thesis has played out (position was exited or target hit)
+- The ticker is in a structural decline with no reversal catalyst
+- No news activity suggests the market has moved on
+
+Keep if:
+- There's an upcoming catalyst (earnings, FDA, conference)
+- Recent news shows the story is still developing
+- The ticker is volatile and could present an entry opportunity
+- We currently hold a position
+
+Respond in JSON:
+{{"remove": true|false, "reasoning": "<one sentence>"}}"""
+
+    response = _call_ollama(ollama_url, model, prompt)
+    return _parse_json_response(response, default_score=0.0)

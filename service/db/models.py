@@ -74,3 +74,15 @@ class TradeAction(Base):
     order_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="pending")
     submitted_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+
+class WatchlistTicker(Base):
+    __tablename__ = "watchlist_tickers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String, unique=True, nullable=False)
+    added_by = Column(String, nullable=False, default="manual")  # "manual", "auto_discovery"
+    added_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    removed_at = Column(DateTime, nullable=True)
+    remove_reason = Column(Text, nullable=True)
+    active = Column(Integer, nullable=False, default=1)  # 1=active, 0=pruned

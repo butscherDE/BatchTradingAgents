@@ -141,6 +141,10 @@ class GpuWorker:
             return self._full_analysis(payload)
         elif task_type == "merge_and_allocate":
             return self._merge_and_allocate(payload)
+        elif task_type == "watchlist_discovery":
+            return self._watchlist_discovery(payload)
+        elif task_type == "watchlist_prune":
+            return self._watchlist_prune(payload)
         else:
             raise ValueError(f"Unknown task type: {task_type}")
 
@@ -161,6 +165,26 @@ class GpuWorker:
             summary=payload.get("summary", ""),
             symbols=payload.get("symbols", []),
             ticker=payload.get("ticker", ""),
+            ollama_url=self.config.gpu.ollama_url,
+            model=self.config.gpu.deep_model,
+        )
+
+    def _watchlist_discovery(self, payload: dict) -> dict:
+        from service.core.news_screener import evaluate_watchlist_addition
+        symbol = payload.get("symbols", [""])[0] or payload.get("ticker", "")
+        return evaluate_watchlist_addition(
+            headline=payload["headline"],
+            summary=payload.get("summary", ""),
+            symbol=symbol,
+            ollama_url=self.config.gpu.ollama_url,
+            model=self.config.gpu.quick_model,
+        )
+
+    def _watchlist_prune(self, payload: dict) -> dict:
+        from service.core.news_screener import evaluate_watchlist_prune
+        return evaluate_watchlist_prune(
+            symbol=payload["symbol"],
+            recent_headlines=payload.get("recent_headlines", []),
             ollama_url=self.config.gpu.ollama_url,
             model=self.config.gpu.deep_model,
         )

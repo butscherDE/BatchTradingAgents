@@ -19,6 +19,12 @@ class EvaluationConfig(BaseSettings):
     news_relevance_min_score: float = 0.6
 
 
+class WatchlistConfig(BaseSettings):
+    dynamic_discovery: bool = False
+    auto_prune: bool = False
+    tickers: list[str] = []
+
+
 class AccountConfig(BaseSettings):
     api_key: str = ""
     api_secret: str = ""
@@ -34,6 +40,7 @@ class ServiceConfig(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     gpu: GpuConfig = Field(default_factory=GpuConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
+    watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
     news_symbols: list[str] = Field(default_factory=lambda: ["*"])
 
@@ -55,6 +62,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     streams_raw = raw.get("streams", {})
     db_raw = raw.get("database", {})
     redis_raw = raw.get("redis", {})
+    watchlist_raw = raw.get("watchlist", {})
 
     accounts = {}
     for name, acct in accounts_raw.items():
@@ -73,6 +81,11 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
         redis_url=redis_raw.get("url", "redis://localhost:6379/0"),
         gpu=GpuConfig(**gpu_raw),
         evaluation=EvaluationConfig(**eval_raw),
+        watchlist=WatchlistConfig(
+            dynamic_discovery=watchlist_raw.get("dynamic_discovery", False),
+            auto_prune=watchlist_raw.get("auto_prune", False),
+            tickers=watchlist_raw.get("tickers", []),
+        ),
         accounts=accounts,
         news_symbols=streams_raw.get("news_symbols", ["*"]),
     )

@@ -39,6 +39,23 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def _seed_watchlist(tickers: list[str]):
+    """Seed watchlist from config on first run (only adds, never removes)."""
+    if not tickers:
+        return
+    from service.db.models import WatchlistTicker
+    from sqlalchemy import select
+    async with get_db_session() as session:
+        for symbol in tickers:
+            sym = symbol.upper().strip()
+            existing = await session.execute(
+                select(WatchlistTicker).where(WatchlistTicker.symbol == sym)
+            )
+            if not existing.scalar_one_or_none():
+                session.add(WatchlistTicker(symbol=sym, added_by="config", active=1))
+        await session.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _config, _scheduler, _session_factory, _start_time, _debouncer
@@ -57,6 +74,9 @@ async def lifespan(app: FastAPI):
     engine = get_async_engine(_config.database_path)
     await init_db(engine)
     _session_factory = get_async_session_factory(engine)
+
+    # Seed watchlist from config if DB is empty
+    await _seed_watchlist(_config.watchlist.tickers)
 
     # Redis / GPU scheduler
     _scheduler = GpuScheduler(_config.redis_url)
@@ -96,6 +116,30 @@ async def lifespan(app: FastAPI):
 async def _handle_news_article(article: dict):
     """Called by stream manager when a new news article arrives."""
     from service.api.ws import broadcast
+    from service.db.models import WatchlistTicker
+    from sqlalchemy import select
+
+    symbols = article.get("symbols", [])
+
+    # Check if any symbol is on the active watchlist
+    on_watchlist = False
+    if symbols:
+        async with get_db_session() as session:
+            result = await session.execute(
+                select(WatchlistTicker.symbol).where(
+                    WatchlistTicker.symbol.in_([s.upper() for s in symbols]),
+                    WatchlistTicker.active == 1,
+                )
+            )
+            watched = set(result.scalars().all())
+            on_watchlist = len(watched) > 0
+
+    # If not on watchlist and discovery is disabled, skip processing
+    if not on_watchlist and not (_config and _config.watchlist.dynamic_discovery):
+        return
+
+    # Determine task type based on watchlist membership
+    task_type = "news_screen" if on_watchlist else "watchlist_discovery"
 
     async with get_db_session() as session:
         db_article = NewsArticle(
@@ -103,7 +147,7 @@ async def _handle_news_article(article: dict):
             headline=article["headline"],
             summary=article.get("summary"),
             source=article.get("source"),
-            symbols=article.get("symbols", []),
+            symbols=symbols,
             published_at=(
                 datetime.datetime.fromisoformat(article["published_at"])
                 if article.get("published_at") else None
@@ -116,26 +160,27 @@ async def _handle_news_article(article: dict):
         await session.refresh(db_article)
         article_id = db_article.id
 
-    # Submit quick-screen task
+    ticker = symbols[0].upper() if symbols else None
+
+    # Submit task
     task_id = await _scheduler.submit(TaskSpec(
         model_tier="quick",
-        task_type="news_screen",
+        task_type=task_type,
         payload={
             "article_id": article_id,
             "headline": article["headline"],
             "summary": article.get("summary", ""),
-            "symbols": article.get("symbols", []),
+            "symbols": symbols,
         },
-        ticker=article.get("symbols", [None])[0] if article.get("symbols") else None,
+        ticker=ticker,
     ))
 
-    # Record task in DB
     async with get_db_session() as session:
         db_task = GpuTask(
             task_id=task_id,
             model_tier="quick",
-            task_type="news_screen",
-            ticker=article.get("symbols", [None])[0] if article.get("symbols") else None,
+            task_type=task_type,
+            ticker=ticker,
             priority=1,
             status=TaskStatus.queued,
             payload={"article_id": article_id},
@@ -146,8 +191,9 @@ async def _handle_news_article(article: dict):
     await broadcast("news_added", {
         "id": article_id,
         "headline": article["headline"],
-        "symbols": article.get("symbols", []),
+        "symbols": symbols,
         "status": "queued",
+        "on_watchlist": on_watchlist,
     })
 
 
@@ -208,6 +254,9 @@ async def _listen_for_results():
             elif task_type == "full_analysis" and status == "completed":
                 await _handle_analysis_result(data)
             elif task_type == "merge_and_allocate" and status == "completed":
+                await _handle_merge_result(data)
+            elif task_type == "watchlist_discovery" and status == "completed":
+                await _handle_discovery_result(data)
                 await _handle_merge_result(data)
 
             await broadcast("task_update", {
@@ -443,6 +492,62 @@ async def _handle_merge_result(data: dict):
     })
 
 
+async def _handle_discovery_result(data: dict):
+    """Process a watchlist discovery result — maybe add ticker to watchlist."""
+    from service.api.ws import broadcast
+    from service.db.models import WatchlistTicker
+
+    result = data.get("result", {})
+    ticker = data.get("ticker")
+    should_add = result.get("add", False)
+    reasoning = result.get("reasoning", "")
+
+    if should_add and ticker:
+        async with get_db_session() as session:
+            from sqlalchemy import select
+            existing = await session.execute(
+                select(WatchlistTicker).where(WatchlistTicker.symbol == ticker.upper())
+            )
+            if not existing.scalar_one_or_none():
+                new_ticker = WatchlistTicker(
+                    symbol=ticker.upper(),
+                    added_by="auto_discovery",
+                    added_at=datetime.datetime.utcnow(),
+                    active=1,
+                )
+                session.add(new_ticker)
+                await session.commit()
+                logger.info(f"Auto-added {ticker} to watchlist: {reasoning}")
+
+                await broadcast("watchlist_changed", {
+                    "action": "added",
+                    "symbol": ticker.upper(),
+                    "reason": reasoning,
+                    "added_by": "auto_discovery",
+                })
+
+    # Update news article status
+    task_id = data.get("task_id")
+    async with get_db_session() as session:
+        from sqlalchemy import select
+        task_result = await session.execute(
+            select(GpuTask).where(GpuTask.task_id == task_id)
+        )
+        task = task_result.scalar_one_or_none()
+        article_id = task.payload.get("article_id") if task and task.payload else None
+
+    if article_id:
+        new_status = InvestigationStatus.escalated if should_add else InvestigationStatus.quick_no_action
+        async with get_db_session() as session:
+            from sqlalchemy import update
+            await session.execute(
+                update(NewsArticle)
+                .where(NewsArticle.id == article_id)
+                .values(status=new_status, quick_result=result)
+            )
+            await session.commit()
+
+
 def _execute_emergency_sell(acct, ticker: str, reason: str) -> dict | None:
     from service.core.trade_executor import execute_emergency_sell
     sell_fraction = _config.evaluation.sell_fraction if _config else 0.5
@@ -517,11 +622,13 @@ def create_app() -> FastAPI:
     from service.api.news import router as news_router
     from service.api.tasks import router as tasks_router
     from service.api.holdings import router as holdings_router
+    from service.api.watchlist import router as watchlist_router
     from service.api.ws import router as ws_router
 
     app.include_router(news_router)
     app.include_router(tasks_router)
     app.include_router(holdings_router)
+    app.include_router(watchlist_router)
     app.include_router(ws_router)
 
     @app.get("/")
