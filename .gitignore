@@ -224,5 +224,9 @@ reports/
 # Service runtime data
 data/
 
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+
 # Claude
 .claude/

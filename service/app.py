@@ -518,6 +518,16 @@ def create_app() -> FastAPI:
     app.include_router(holdings_router)
     app.include_router(ws_router)
 
+    @app.get("/")
+    async def root():
+        from pathlib import Path
+        frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+        if frontend_dist.exists():
+            from fastapi.responses import FileResponse
+            return FileResponse(frontend_dist / "index.html")
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url="/docs")
+
     @app.get("/api/health")
     async def health():
         import time
@@ -532,5 +542,21 @@ def create_app() -> FastAPI:
             queue_depths=depths,
             uptime_seconds=time.time() - _start_time,
         )
+
+    # Serve frontend static build if it exists
+    from pathlib import Path
+    frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
+    if frontend_dist.exists():
+        from fastapi.responses import FileResponse
+
+        @app.get("/{path:path}", include_in_schema=False)
+        async def serve_frontend(path: str):
+            if path.startswith("api/") or path.startswith("docs") or path.startswith("redoc") or path.startswith("openapi") or path == "ws":
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404)
+            file = frontend_dist / path
+            if file.exists() and file.is_file():
+                return FileResponse(file)
+            return FileResponse(frontend_dist / "index.html")
 
     return app
