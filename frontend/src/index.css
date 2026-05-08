@@ -1,14 +1,14 @@
 :root {
-  --bg: #1a1a2e;
-  --surface: #16213e;
-  --border: #0f3460;
-  --text: #e0e0e0;
-  --text-dim: #8892b0;
-  --accent: #4fc3f7;
-  --green: #66bb6a;
-  --red: #ef5350;
-  --yellow: #ffd54f;
-  --purple: #ab47bc;
+  --bg: #0f0f0f;
+  --surface: #1c1c1c;
+  --border: #2e2e2e;
+  --text: #f0f0f0;
+  --text-dim: #999;
+  --accent: #7dd3fc;
+  --green: #4ade80;
+  --red: #f87171;
+  --yellow: #fbbf24;
+  --purple: #c084fc;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -125,6 +125,7 @@ tr:hover { background: var(--surface); }
 .stat-card .value {
   font-size: 24px;
   font-weight: 700;
+  color: var(--text);
 }
 
 .positive { color: var(--green); }

@@ -107,3 +107,79 @@ async def get_news_state(article_id: int, session: AsyncSession = Depends(get_se
         "deep_result": article.deep_result,
         "escalation_reason": article.escalation_reason,
     }
+
+
+class InjectNewsRequest(BaseModel):
+    headline: str
+    summary: str = ""
+    symbols: list[str] = []
+    source: str = "manual"
+
+
+from pydantic import BaseModel
+
+
+@router.post("", response_model=NewsArticleResponse, status_code=201)
+async def inject_news(body: InjectNewsRequest, session: AsyncSession = Depends(get_session)):
+    """Manually inject a news article (for testing/debugging)."""
+    import datetime
+    from service.db.models import InvestigationStatus
+
+    article = NewsArticle(
+        headline=body.headline,
+        summary=body.summary or None,
+        source=body.source,
+        symbols=body.symbols,
+        received_at=datetime.datetime.utcnow(),
+        status=InvestigationStatus.queued,
+    )
+    session.add(article)
+    await session.commit()
+    await session.refresh(article)
+
+    # Submit to GPU queue if scheduler is available
+    try:
+        from service.app import _scheduler
+        from service.core.gpu_scheduler import TaskSpec
+        from service.db.models import GpuTask, TaskStatus
+
+        if _scheduler:
+            task_id = await _scheduler.submit(TaskSpec(
+                model_tier="quick",
+                task_type="news_screen",
+                payload={
+                    "article_id": article.id,
+                    "headline": body.headline,
+                    "summary": body.summary,
+                    "symbols": body.symbols,
+                },
+                ticker=body.symbols[0] if body.symbols else None,
+            ))
+            db_task = GpuTask(
+                task_id=task_id,
+                model_tier="quick",
+                task_type="news_screen",
+                ticker=body.symbols[0] if body.symbols else None,
+                priority=1,
+                status=TaskStatus.queued,
+                payload={"article_id": article.id},
+            )
+            session.add(db_task)
+            await session.commit()
+    except Exception:
+        pass
+
+    return NewsArticleResponse(
+        id=article.id,
+        alpaca_id=None,
+        headline=article.headline,
+        summary=article.summary,
+        source=article.source,
+        symbols=article.symbols or [],
+        published_at=None,
+        received_at=article.received_at,
+        status=article.status.value,
+        quick_result=None,
+        deep_result=None,
+        escalation_reason=None,
+    )
