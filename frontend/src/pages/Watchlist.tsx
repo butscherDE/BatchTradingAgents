@@ -47,7 +47,7 @@ export default function Watchlist() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ symbol }),
-      }).then(r => { if (!r.ok) throw new Error('Failed'); return r.json() }),
+      }).then(async r => { if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json() }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
       setNewSymbol('')
@@ -103,6 +103,12 @@ export default function Watchlist() {
           Show removed
         </label>
       </div>
+
+      {addMutation.isError && (
+        <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 13 }}>
+          {(addMutation.error as Error).message}
+        </p>
+      )}
 
       {isLoading ? <p>Loading...</p> : (
         <table>

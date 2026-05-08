@@ -68,6 +68,12 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol required")
 
+    # Validate ticker exists
+    import asyncio
+    valid = await asyncio.to_thread(_validate_ticker, symbol)
+    if not valid:
+        raise HTTPException(status_code=400, detail=f"'{symbol}' is not a valid tradeable ticker")
+
     existing = await session.execute(
         select(WatchlistTicker).where(WatchlistTicker.symbol == symbol)
     )
@@ -132,3 +138,20 @@ async def get_watchlist_config():
         "dynamic_discovery": _config.watchlist.dynamic_discovery,
         "auto_prune": _config.watchlist.auto_prune,
     }
+
+
+def _validate_ticker(symbol: str) -> bool:
+    """Check if a ticker is a valid tradeable asset on Alpaca."""
+    from service.app import _config
+
+    if not _config or not _config.accounts:
+        return True  # Can't validate without credentials, allow it
+
+    acct = next(iter(_config.accounts.values()))
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
+        asset = client.get_asset(symbol)
+        return asset.tradable
+    except Exception:
+        return False
