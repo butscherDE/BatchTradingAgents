@@ -6,11 +6,11 @@ import { parseUtc, formatTime } from '../api/time'
 
 export default function Tasks() {
   const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState(50)
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter] = useState('')
   const [tickerFilter, setTickerFilter] = useState('')
   const [modelFilter, setModelFilter] = useState('')
-  const pageSize = 50
 
   const queryClient = useQueryClient()
   const { lastMessage, connected } = useWebSocket()
@@ -157,7 +157,17 @@ export default function Tasks() {
             <span style={{ color: 'var(--text-dim)' }}>
               Page {page + 1} · Showing {filtered.length} tasks
             </span>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select
+                value={pageSize}
+                onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+                style={{ fontSize: 13 }}
+              >
+                <option value={10}>10 / page</option>
+                <option value={20}>20 / page</option>
+                <option value={50}>50 / page</option>
+                <option value={100}>100 / page</option>
+              </select>
               <button
                 onClick={() => setPage(p => Math.max(0, p - 1))}
                 disabled={page === 0}
