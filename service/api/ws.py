@@ -21,9 +21,14 @@ async def websocket_endpoint(websocket: WebSocket):
 
     try:
         while True:
-            # Keep connection alive; client can send pings
-            await websocket.receive_text()
+            # Send ping every 30s to keep connection alive (Windows ProactorEventLoop drops idle sockets)
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
+            except asyncio.TimeoutError:
+                await websocket.send_text('{"type":"ping"}')
     except WebSocketDisconnect:
+        pass
+    except Exception:
         pass
     finally:
         _connections.discard(websocket)
