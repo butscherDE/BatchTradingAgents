@@ -53,7 +53,7 @@ class AlpacaNewsStream:
 
     async def _run_stream(self):
         try:
-            await asyncio.to_thread(self._stream._run_forever)
+            await self._stream._run_forever()
         except Exception:
             logger.exception("News stream connection error")
 
