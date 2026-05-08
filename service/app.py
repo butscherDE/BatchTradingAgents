@@ -543,6 +543,12 @@ def create_app() -> FastAPI:
             uptime_seconds=time.time() - _start_time,
         )
 
+    @app.get("/api/logs")
+    async def logs(limit: int = 1000):
+        from service.main import ring_handler
+        lines = ring_handler.get_lines()
+        return {"lines": lines[-limit:], "total": len(lines)}
+
     # Serve frontend static build if it exists
     from pathlib import Path
     frontend_dist = Path(__file__).parent.parent / "frontend" / "dist"
