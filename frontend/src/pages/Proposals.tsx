@@ -22,6 +22,9 @@ interface ProposalDetail {
   merge_report: string
   tickers: string[]
   ticker_data: { ticker: string; decision: string; reasoning: string }[]
+  allocation: { symbol: string; action: string; pct: number }[] | null
+  allocation_reasoning: string | null
+  cash_pct: number | null
   proposed_orders: { ticker: string; side: string; qty?: number; notional?: number }[] | null
   superseded_by: number | null
   created_at: string
@@ -186,20 +189,64 @@ export default function Proposals() {
             </div>
           )}
 
-          {detail.proposed_orders && detail.proposed_orders.length > 0 && (
+          {detail.allocation && detail.allocation.length > 0 && (
             <div style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>PROPOSED ORDERS</h3>
+              <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>ALLOCATION PLAN</h3>
+              {detail.allocation_reasoning && (
+                <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 8 }}>{detail.allocation_reasoning}</p>
+              )}
               <table>
                 <thead>
-                  <tr><th>Ticker</th><th>Side</th><th>Qty</th><th>Notional</th></tr>
+                  <tr><th>Ticker</th><th>Action</th><th>Target %</th><th style={{ width: 200 }}>Bar</th></tr>
+                </thead>
+                <tbody>
+                  {detail.allocation.map((a, i) => (
+                    <tr key={i}>
+                      <td style={{ fontWeight: 600 }}>{a.symbol}</td>
+                      <td className={a.action === 'buy' ? 'positive' : a.action === 'sell' ? 'negative' : ''}>{a.action}</td>
+                      <td>{a.pct.toFixed(1)}%</td>
+                      <td>
+                        <div style={{ background: 'var(--border)', borderRadius: 3, height: 16, width: '100%' }}>
+                          <div style={{
+                            background: a.action === 'buy' ? 'var(--green)' : a.action === 'sell' ? 'var(--red)' : 'var(--text-dim)',
+                            width: `${Math.min(a.pct, 100)}%`,
+                            height: '100%',
+                            borderRadius: 3,
+                          }} />
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {detail.cash_pct != null && (
+                    <tr>
+                      <td style={{ fontWeight: 600 }}>CASH</td>
+                      <td>hold</td>
+                      <td>{detail.cash_pct.toFixed(1)}%</td>
+                      <td>
+                        <div style={{ background: 'var(--border)', borderRadius: 3, height: 16, width: '100%' }}>
+                          <div style={{ background: 'var(--yellow)', width: `${Math.min(detail.cash_pct, 100)}%`, height: '100%', borderRadius: 3 }} />
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {detail.proposed_orders && detail.proposed_orders.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>ORDERS TO EXECUTE</h3>
+              <table>
+                <thead>
+                  <tr><th>Ticker</th><th>Side</th><th>Qty</th></tr>
                 </thead>
                 <tbody>
                   {detail.proposed_orders.map((o, i) => (
                     <tr key={i}>
-                      <td>{o.ticker}</td>
-                      <td className={o.side === 'buy' ? 'positive' : 'negative'}>{o.side}</td>
+                      <td style={{ fontWeight: 600 }}>{o.ticker}</td>
+                      <td className={o.side === 'buy' ? 'positive' : 'negative'}>{o.side.toUpperCase()}</td>
                       <td>{o.qty ?? '—'}</td>
-                      <td>{o.notional ? `$${o.notional.toLocaleString()}` : '—'}</td>
                     </tr>
                   ))}
                 </tbody>

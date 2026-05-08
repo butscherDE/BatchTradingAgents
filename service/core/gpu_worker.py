@@ -230,6 +230,7 @@ class GpuWorker:
     def _merge_and_allocate(self, payload: dict) -> dict:
         from shared.merge import generate_merge_report, validate_merge_report
         from shared.config import build_graph_config
+        from cli.order_parser import parse_orders
 
         tickers_data = payload["tickers_data"]  # list of {ticker, decision, final_state}
         account_id = payload.get("account_id")
@@ -267,6 +268,67 @@ class GpuWorker:
             portfolio=portfolio,
         )
 
+        # Generate allocation plan + concrete orders
+        allocation_data = []
+        proposed_orders = []
+        allocation_reasoning = ""
+
+        if portfolio:
+            try:
+                portfolio_dict = {
+                    "holdings": portfolio.get("holdings", {}),
+                    "cash": portfolio.get("cash", 0),
+                }
+                # Get current prices for order sizing
+                quotes = {}
+                for t in tickers_data:
+                    fs = t.get("final_state", {})
+                    # Try to get price from the state if available
+                    if "current_price" in t:
+                        quotes[t["ticker"]] = t["current_price"]
+
+                # Fetch live quotes if available
+                try:
+                    from cli.alpaca_client import create_client, fetch_quotes
+                    from service.app import _config
+                    acct = _config.accounts.get(account_id) if _config else None
+                    if acct:
+                        client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+                        live_quotes = fetch_quotes(client, [t["ticker"] for t in tickers_data])
+                        quotes.update(live_quotes)
+                except Exception:
+                    pass
+
+                trade_plan, allocation_plan = parse_orders(
+                    merge_report=validated_report,
+                    portfolio_dict=portfolio_dict,
+                    quotes=quotes,
+                    pending=[],
+                    config=config,
+                    strategy=strategy,
+                )
+
+                allocation_data = [
+                    {
+                        "symbol": a.symbol,
+                        "action": a.action,
+                        "pct": a.pct,
+                    }
+                    for a in allocation_plan.allocations
+                ]
+                allocation_reasoning = allocation_plan.reasoning
+
+                proposed_orders = [
+                    {
+                        "ticker": o.symbol,
+                        "side": o.side,
+                        "qty": o.qty,
+                    }
+                    for o in trade_plan.orders
+                ]
+            except Exception as e:
+                allocation_reasoning = f"Allocation failed: {e}"
+
         return {
             "account_id": account_id,
             "merge_report": validated_report,
@@ -280,7 +342,10 @@ class GpuWorker:
                 for t in tickers_data
             ],
             "strategy": strategy,
-            "proposed_orders": [],  # TODO: extract structured orders from merge report
+            "proposed_orders": proposed_orders,
+            "allocation": allocation_data,
+            "allocation_reasoning": allocation_reasoning,
+            "cash_pct": allocation_plan.cash_pct if 'allocation_plan' in dir() else None,
         }
 
     def _publish_status(self, state: str, message: str):

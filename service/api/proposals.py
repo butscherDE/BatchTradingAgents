@@ -39,6 +39,9 @@ class ProposalDetail(BaseModel):
     merge_report: str
     tickers: list[str]
     ticker_data: list[dict]
+    allocation: Optional[list[dict]] = None
+    allocation_reasoning: Optional[str] = None
+    cash_pct: Optional[float] = None
     proposed_orders: Optional[list[dict]] = None
     source_task_id: Optional[str] = None
     superseded_by: Optional[int] = None
@@ -95,6 +98,9 @@ async def get_proposal(proposal_id: int, session: AsyncSession = Depends(get_ses
         merge_report=p.merge_report,
         tickers=p.tickers or [],
         ticker_data=p.ticker_data or [],
+        allocation=p.allocation,
+        allocation_reasoning=p.allocation_reasoning,
+        cash_pct=p.cash_pct,
         proposed_orders=p.proposed_orders,
         source_task_id=p.source_task_id,
         superseded_by=p.superseded_by,

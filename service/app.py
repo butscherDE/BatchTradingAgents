@@ -531,6 +531,9 @@ async def _handle_merge_result(data: dict):
             merge_report=merge_report,
             tickers=tickers,
             ticker_data=ticker_data,
+            allocation=result.get("allocation", []),
+            allocation_reasoning=result.get("allocation_reasoning", ""),
+            cash_pct=result.get("cash_pct"),
             proposed_orders=proposed_orders,
             source_task_id=task_id,
         )
