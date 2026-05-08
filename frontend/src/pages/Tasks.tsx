@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, TaskItem, TaskStats } from '../api/client'
 import { useWebSocket } from '../api/websocket'
+import { parseUtc, formatTime } from '../api/time'
 
 export default function Tasks() {
   const queryClient = useQueryClient()
@@ -79,14 +80,14 @@ export default function Tasks() {
           <tbody>
             {tasks.map((t: TaskItem) => {
               const duration = t.started_at && t.completed_at
-                ? ((new Date(t.completed_at).getTime() - new Date(t.started_at).getTime()) / 1000).toFixed(1) + 's'
+                ? ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
                 : t.started_at
                   ? 'running...'
                   : '—'
               return (
                 <tr key={t.id}>
                   <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
-                    {new Date(t.created_at).toLocaleTimeString()}
+                    {formatTime(t.created_at)}
                   </td>
                   <td>{t.task_type}</td>
                   <td>{t.ticker ?? '—'}</td>

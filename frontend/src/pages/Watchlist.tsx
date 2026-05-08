@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
+import { parseUtc } from '../api/time'
 
 interface WatchlistTicker {
   id: number
@@ -123,7 +124,7 @@ export default function Watchlist() {
                     {t.added_by}
                   </span>
                 </td>
-                <td style={{ fontSize: 12 }}>{new Date(t.added_at).toLocaleDateString()}</td>
+                <td style={{ fontSize: 12 }}>{parseUtc(t.added_at).toLocaleDateString()}</td>
                 <td>
                   {t.active ? (
                     <span className="badge badge-completed">active</span>

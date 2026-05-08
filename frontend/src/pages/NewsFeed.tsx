@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, NewsArticle } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { useEffect } from 'react'
+import { formatTime, formatDateTime } from '../api/time'
 
 function DetailModal({ article, onClose }: { article: NewsArticle; onClose: () => void }) {
   return (
@@ -21,8 +22,8 @@ function DetailModal({ article, onClose }: { article: NewsArticle; onClose: () =
                 <tr><td>Symbols</td><td>{article.symbols.join(', ') || '—'}</td></tr>
                 <tr><td>Source</td><td>{article.source || '—'}</td></tr>
                 <tr><td>Status</td><td><span className={`badge badge-${article.status}`}>{article.status}</span></td></tr>
-                <tr><td>Published</td><td>{article.published_at ? new Date(article.published_at).toLocaleString() : '—'}</td></tr>
-                <tr><td>Received</td><td>{new Date(article.received_at).toLocaleString()}</td></tr>
+                <tr><td>Published</td><td>{article.published_at ? formatDateTime(article.published_at) : '—'}</td></tr>
+                <tr><td>Received</td><td>{formatDateTime(article.received_at)}</td></tr>
               </tbody>
             </table>
           </div>
@@ -132,7 +133,7 @@ export default function NewsFeed() {
             {articles.map((a: NewsArticle) => (
               <tr key={a.id} onClick={() => setSelectedArticle(a)} style={{ cursor: 'pointer' }}>
                 <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
-                  {new Date(a.received_at).toLocaleTimeString()}
+                  {formatTime(a.received_at)}
                 </td>
                 <td>{a.headline}</td>
                 <td>{a.symbols.join(', ')}</td>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
+import { formatTime } from '../api/time'
 
 interface ProposalSummary {
   id: number
@@ -110,7 +111,7 @@ export default function Proposals() {
                   <span className="badge badge-escalated" style={{ marginLeft: 8 }}>{p.strategy}</span>
                 </div>
                 <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
-                  {new Date(p.created_at).toLocaleTimeString()}
+                  {formatTime(p.created_at)}
                 </span>
               </div>
               <div style={{ marginTop: 6, fontSize: 13 }}>{p.tickers.join(', ')}</div>
