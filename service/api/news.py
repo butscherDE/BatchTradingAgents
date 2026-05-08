@@ -109,14 +109,14 @@ async def get_news_state(article_id: int, session: AsyncSession = Depends(get_se
     }
 
 
+from pydantic import BaseModel
+
+
 class InjectNewsRequest(BaseModel):
     headline: str
     summary: str = ""
     symbols: list[str] = []
     source: str = "manual"
-
-
-from pydantic import BaseModel
 
 
 @router.post("", response_model=NewsArticleResponse, status_code=201)
