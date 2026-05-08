@@ -545,7 +545,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/logs")
     async def logs(limit: int = 1000):
-        from service.main import ring_handler
+        from service.log_buffer import ring_handler
         lines = ring_handler.get_lines()
         return {"lines": lines[-limit:], "total": len(lines)}
 

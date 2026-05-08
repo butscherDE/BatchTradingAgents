@@ -1,6 +1,5 @@
 """Service entry point — starts FastAPI + GPU worker subprocess."""
 
-import collections
 import logging
 import multiprocessing
 import signal
@@ -10,24 +9,8 @@ from pathlib import Path
 import uvicorn
 
 from service.config import load_config
+from service.log_buffer import ring_handler
 
-
-class RingBufferHandler(logging.Handler):
-    """Keeps the last N log records in memory."""
-
-    def __init__(self, capacity: int = 1000):
-        super().__init__()
-        self.buffer: collections.deque[str] = collections.deque(maxlen=capacity)
-
-    def emit(self, record):
-        self.buffer.append(self.format(record))
-
-    def get_lines(self) -> list[str]:
-        return list(self.buffer)
-
-
-ring_handler = RingBufferHandler(capacity=1000)
-ring_handler.setFormatter(logging.Formatter("%(asctime)s [%(name)s] %(levelname)s: %(message)s", datefmt="%H:%M:%S"))
 
 logging.basicConfig(
     level=logging.INFO,
