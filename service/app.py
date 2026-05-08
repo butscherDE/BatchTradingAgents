@@ -177,17 +177,27 @@ async def _listen_for_results():
             # Update task in DB
             async with get_db_session() as session:
                 from sqlalchemy import update
-                await session.execute(
-                    update(GpuTask)
-                    .where(GpuTask.task_id == task_id)
-                    .values(
-                        status=TaskStatus.completed if status == "completed" else TaskStatus.failed,
-                        result=data.get("result"),
-                        error=data.get("error"),
-                        started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
-                        completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+                if status == "running":
+                    await session.execute(
+                        update(GpuTask)
+                        .where(GpuTask.task_id == task_id)
+                        .values(
+                            status=TaskStatus.running,
+                            started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+                        )
                     )
-                )
+                else:
+                    await session.execute(
+                        update(GpuTask)
+                        .where(GpuTask.task_id == task_id)
+                        .values(
+                            status=TaskStatus.completed if status == "completed" else TaskStatus.failed,
+                            result=data.get("result"),
+                            error=data.get("error"),
+                            started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+                            completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+                        )
+                    )
                 await session.commit()
 
             # Handle result based on task type

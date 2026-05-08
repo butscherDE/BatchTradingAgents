@@ -101,6 +101,15 @@ class GpuWorker:
 
         started_at = datetime.datetime.utcnow().isoformat()
 
+        # Publish "started" so the API shows task as running
+        self._redis.publish(RESULT_CHANNEL, json.dumps({
+            "task_id": task_id,
+            "task_type": task_type,
+            "ticker": ticker,
+            "status": "running",
+            "started_at": started_at,
+        }))
+
         try:
             result = self._dispatch(task_type, task.get("payload", {}))
             self._redis.publish(RESULT_CHANNEL, json.dumps({
@@ -161,11 +170,15 @@ class GpuWorker:
         from shared.config import build_graph_config
 
         ticker = payload["ticker"]
+        ollama_base = self.config.gpu.ollama_url.rstrip("/")
+        if not ollama_base.endswith("/v1"):
+            ollama_base += "/v1"
+
         config = build_graph_config(
             provider="ollama",
             quick_model=self.config.gpu.quick_model,
             deep_model=self.config.gpu.deep_model,
-            backend_url=self.config.gpu.ollama_url,
+            backend_url=ollama_base,
         )
 
         result = run_single_ticker(
@@ -197,11 +210,15 @@ class GpuWorker:
         strategy = payload.get("strategy", "balanced")
         portfolio = payload.get("portfolio")
 
+        ollama_base = self.config.gpu.ollama_url.rstrip("/")
+        if not ollama_base.endswith("/v1"):
+            ollama_base += "/v1"
+
         config = build_graph_config(
             provider="ollama",
             quick_model=self.config.gpu.quick_model,
             deep_model=self.config.gpu.deep_model,
-            backend_url=self.config.gpu.ollama_url,
+            backend_url=ollama_base,
         )
 
         ticker_results = [
