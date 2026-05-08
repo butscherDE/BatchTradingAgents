@@ -65,12 +65,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Redis connection failed (tasks will not process): {e}")
 
-    # News + price streams
-    stream_manager = StreamManager(
-        _config,
-        on_news=_handle_news_article,
-        on_price_bar=_handle_price_bar,
-    )
+    # News stream (single connection — Alpaca connection limit)
+    stream_manager = StreamManager(_config, on_news=_handle_news_article)
     try:
         await stream_manager.start()
     except Exception as e:
