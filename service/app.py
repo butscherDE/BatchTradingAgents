@@ -609,10 +609,6 @@ async def _handle_analysis_result(data: dict):
     # Store the report state for later merge
     _latest_reports[ticker] = result
 
-    # Trigger debounce for all accounts that have this ticker in their watchlist
-    for acct_name in (_config.accounts if _config else {}):
-        await _debouncer.ticker_updated(acct_name, ticker)
-
     await broadcast("report_generated", {
         "ticker": ticker,
         "decision": decision,
