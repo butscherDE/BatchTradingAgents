@@ -700,7 +700,28 @@ async def _handle_discovery_result(data: dict):
                     WatchlistTicker.symbol == ticker.upper(),
                 )
             )
-            if not existing.scalar_one_or_none():
+            row = existing.scalar_one_or_none()
+
+            if row and row.active:
+                pass  # Already on watchlist, nothing to do
+            elif row and not row.active:
+                # Reactivate previously removed ticker
+                row.active = 1
+                row.removed_at = None
+                row.remove_reason = None
+                row.added_by = "auto_discovery"
+                row.added_at = datetime.datetime.utcnow()
+                session.add(WatchlistEvent(
+                    account_id=account_id,
+                    symbol=ticker.upper(),
+                    action="added",
+                    trigger="auto_discovery",
+                    reasoning=reasoning,
+                ))
+                await session.commit()
+                logger.info(f"Reactivated {ticker} on {account_id} watchlist: {reasoning}")
+            else:
+                # New ticker
                 session.add(WatchlistTicker(
                     account_id=account_id,
                     symbol=ticker.upper(),
@@ -718,6 +739,7 @@ async def _handle_discovery_result(data: dict):
                 await session.commit()
                 logger.info(f"Auto-added {ticker} to {account_id} watchlist: {reasoning}")
 
+            if not (row and row.active):
                 await broadcast("watchlist_changed", {
                     "action": "added",
                     "symbol": ticker.upper(),
@@ -725,7 +747,7 @@ async def _handle_discovery_result(data: dict):
                     "reason": reasoning,
                 })
 
-                # Trigger full analysis for the newly discovered ticker
+                # Trigger follow-up based on whether report exists
                 from pathlib import Path
                 state_file = Path("reports") / "_states" / f"{ticker.upper()}.json"
                 if not state_file.exists():
@@ -743,7 +765,6 @@ async def _handle_discovery_result(data: dict):
                         ))
                         await session.commit()
                 elif article_id:
-                    # Report exists — screen the news article against it
                     async with get_db_session() as session:
                         from sqlalchemy import select as sa_select
                         art_result = await session.execute(
