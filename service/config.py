@@ -17,6 +17,8 @@ class EvaluationConfig(BaseSettings):
     debounce_seconds: int = 300
     sell_fraction: float = 0.5
     news_relevance_min_score: float = 0.6
+    merge_checks: int = 1
+    allocation_checks: int = 1
 
 
 class WatchlistConfig(BaseSettings):

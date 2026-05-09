@@ -98,12 +98,19 @@ export default function Proposals() {
     queryFn: api.getAccounts,
   })
 
+  const [mergeChecks, setMergeChecks] = useState(1)
+  const [allocChecks, setAllocChecks] = useState(1)
+
   const triggerMutation = useMutation({
-    mutationFn: (accountId: string) =>
-      fetch(`/api/proposals/trigger?account_id=${accountId}`, { method: 'POST' }).then(async r => {
+    mutationFn: (accountId: string) => {
+      const params = new URLSearchParams({ account_id: accountId })
+      if (mergeChecks !== 1) params.set('merge_checks', String(mergeChecks))
+      if (allocChecks !== 1) params.set('allocation_checks', String(allocChecks))
+      return fetch(`/api/proposals/trigger?${params.toString()}`, { method: 'POST' }).then(async r => {
         if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
         return r.json()
-      }),
+      })
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
       alert(`Merge+Allocate submitted for ${data.tickers_count} tickers`)
@@ -114,7 +121,7 @@ export default function Proposals() {
     <div>
       <h1>Trade Proposals</h1>
 
-      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Trigger merge & allocation:</span>
         {accounts.map((a: AccountSummary) => (
           <button
@@ -126,6 +133,20 @@ export default function Proposals() {
             {a.name} ({a.strategy})
           </button>
         ))}
+        <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>Merge checks:</span>
+        <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 50, fontSize: 12 }}>
+          <option value={0}>0</option>
+          <option value={1}>1</option>
+          <option value={2}>2</option>
+          <option value={3}>3</option>
+        </select>
+        <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks:</span>
+        <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 50, fontSize: 12 }}>
+          <option value={0}>0</option>
+          <option value={1}>1</option>
+          <option value={2}>2</option>
+          <option value={3}>3</option>
+        </select>
       </div>
       {triggerMutation.isError && (
         <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>

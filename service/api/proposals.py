@@ -222,6 +222,8 @@ def _execute_orders(acct, orders: list[dict]) -> list[dict]:
 @router.post("/trigger")
 async def trigger_merge_allocate(
     account_id: str = Query(...),
+    merge_checks: Optional[int] = Query(default=None, description="Override merge validation passes"),
+    allocation_checks: Optional[int] = Query(default=None, description="Override allocation validation passes"),
     session: AsyncSession = Depends(get_session),
 ):
     """Manually trigger a merge+allocate for an account using latest reports on disk."""
@@ -288,6 +290,8 @@ async def trigger_merge_allocate(
             "tickers_data": tickers_data,
             "strategy": acct.strategy,
             "portfolio": portfolio,
+            "merge_checks_override": merge_checks,
+            "allocation_checks_override": allocation_checks,
         },
     ))
 

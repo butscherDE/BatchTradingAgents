@@ -312,13 +312,17 @@ class GpuWorker:
             strategy=strategy,
         )
 
-        validated_report = validate_merge_report(
-            merge_report=merge_report,
-            ticker_results=ticker_results,
-            config=config,
-            strategy=strategy,
-            portfolio=portfolio,
-        )
+        # Validate merge report (N passes)
+        merge_checks = payload.get("merge_checks_override") or self.config.evaluation.merge_checks
+        validated_report = merge_report
+        for _ in range(merge_checks):
+            validated_report = validate_merge_report(
+                merge_report=validated_report,
+                ticker_results=ticker_results,
+                config=config,
+                strategy=strategy,
+                portfolio=portfolio,
+            )
 
         # Generate allocation plan + concrete orders
         allocation_data = []
@@ -358,6 +362,7 @@ class GpuWorker:
                     pending=[],
                     config=config,
                     strategy=strategy,
+                    allocation_checks=payload.get("allocation_checks_override") or self.config.evaluation.allocation_checks,
                 )
 
                 # Compute current allocations for comparison
