@@ -3,6 +3,7 @@
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -109,9 +110,6 @@ async def get_news_state(article_id: int, session: AsyncSession = Depends(get_se
     }
 
 
-from pydantic import BaseModel
-
-
 class InjectNewsRequest(BaseModel):
     headline: str
     summary: str = ""
@@ -121,53 +119,27 @@ class InjectNewsRequest(BaseModel):
 
 @router.post("", response_model=NewsArticleResponse, status_code=201)
 async def inject_news(body: InjectNewsRequest, session: AsyncSession = Depends(get_session)):
-    """Manually inject a news article (for testing/debugging)."""
-    import datetime
-    from service.db.models import InvestigationStatus
+    """Manually inject a news article (routes through same logic as live news)."""
+    from service.app import _handle_news_article
 
-    article = NewsArticle(
-        headline=body.headline,
-        summary=body.summary or None,
-        source=body.source,
-        symbols=body.symbols,
-        received_at=datetime.datetime.utcnow(),
-        status=InvestigationStatus.queued,
+    await _handle_news_article({
+        "alpaca_id": None,
+        "headline": body.headline,
+        "summary": body.summary or "",
+        "source": body.source,
+        "symbols": body.symbols,
+        "published_at": None,
+    })
+
+    # Return the created article
+    result = await session.execute(
+        select(NewsArticle).order_by(NewsArticle.id.desc()).limit(1)
     )
-    session.add(article)
-    await session.commit()
-    await session.refresh(article)
+    article = result.scalar_one_or_none()
 
-    # Submit to GPU queue if scheduler is available
-    try:
-        from service.app import _scheduler
-        from service.core.gpu_scheduler import TaskSpec
-        from service.db.models import GpuTask, TaskStatus
-
-        if _scheduler:
-            task_id = await _scheduler.submit(TaskSpec(
-                model_tier="quick",
-                task_type="news_screen",
-                payload={
-                    "article_id": article.id,
-                    "headline": body.headline,
-                    "summary": body.summary,
-                    "symbols": body.symbols,
-                },
-                ticker=body.symbols[0] if body.symbols else None,
-            ))
-            db_task = GpuTask(
-                task_id=task_id,
-                model_tier="quick",
-                task_type="news_screen",
-                ticker=body.symbols[0] if body.symbols else None,
-                priority=1,
-                status=TaskStatus.queued,
-                payload={"article_id": article.id},
-            )
-            session.add(db_task)
-            await session.commit()
-    except Exception:
-        pass
+    if not article:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail="Article was filtered (ticker not on any watchlist and discovery is disabled)")
 
     return NewsArticleResponse(
         id=article.id,
@@ -178,7 +150,7 @@ async def inject_news(body: InjectNewsRequest, session: AsyncSession = Depends(g
         symbols=article.symbols or [],
         published_at=None,
         received_at=article.received_at,
-        status=article.status.value,
+        status=article.status.value if hasattr(article.status, "value") else article.status,
         quick_result=None,
         deep_result=None,
         escalation_reason=None,
