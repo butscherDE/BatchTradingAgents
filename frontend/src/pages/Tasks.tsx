@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { api, TaskItem, TaskStats, fetchJson } from '../api/client'
@@ -197,8 +197,8 @@ export default function Tasks() {
                   duration = `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
                 }
                 return (
-                  <>
-                  <tr key={t.id} onClick={async () => {
+                  <React.Fragment key={t.id}>
+                  <tr onClick={async () => {
                     if (expandedTask === t.task_id) {
                       setExpandedTask(null)
                       setTaskDetail(null)
@@ -262,7 +262,7 @@ export default function Tasks() {
                       </td>
                     </tr>
                   )}
-                  </>
+                  </React.Fragment>
                 )
               })}
             </tbody>
