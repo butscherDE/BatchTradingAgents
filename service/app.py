@@ -373,54 +373,58 @@ async def _listen_for_results():
             task_type = data.get("task_type")
             status = data.get("status")
 
-            # Update task in DB
-            async with get_db_session() as session:
-                from sqlalchemy import update
-                if status == "running":
-                    await session.execute(
-                        update(GpuTask)
-                        .where(GpuTask.task_id == task_id)
-                        .values(
-                            status=TaskStatus.running,
-                            started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+            try:
+                # Update task in DB
+                async with get_db_session() as session:
+                    from sqlalchemy import update
+                    if status == "running":
+                        await session.execute(
+                            update(GpuTask)
+                            .where(GpuTask.task_id == task_id)
+                            .values(
+                                status=TaskStatus.running,
+                                started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+                            )
                         )
-                    )
-                else:
-                    await session.execute(
-                        update(GpuTask)
-                        .where(GpuTask.task_id == task_id)
-                        .values(
-                            status=TaskStatus.completed if status == "completed" else TaskStatus.failed,
-                            result=data.get("result"),
-                            error=data.get("error"),
-                            started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
-                            completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+                    else:
+                        await session.execute(
+                            update(GpuTask)
+                            .where(GpuTask.task_id == task_id)
+                            .values(
+                                status=TaskStatus.completed if status == "completed" else TaskStatus.failed,
+                                result=data.get("result"),
+                                error=data.get("error"),
+                                started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+                                completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+                            )
                         )
-                    )
-                await session.commit()
+                    await session.commit()
 
-            # Handle result based on task type
-            if task_type == "news_screen" and status == "completed":
-                await _handle_screen_result(data)
-            elif task_type == "investigation" and status == "completed":
-                await _handle_investigation_result(data)
-            elif task_type == "full_analysis" and status == "completed":
-                await _handle_analysis_result(data)
-            elif task_type == "merge_and_allocate" and status == "completed":
-                await _handle_merge_result(data)
-            elif task_type == "watchlist_discovery" and status == "completed":
-                await _handle_discovery_result(data)
-            elif task_type == "watchlist_prune" and status == "completed":
-                await _handle_prune_result(data)
-            elif task_type == "news_consolidate" and status == "completed":
-                await _handle_consolidate_result(data)
+                # Handle result based on task type
+                if task_type == "news_screen" and status == "completed":
+                    await _handle_screen_result(data)
+                elif task_type == "investigation" and status == "completed":
+                    await _handle_investigation_result(data)
+                elif task_type == "full_analysis" and status == "completed":
+                    await _handle_analysis_result(data)
+                elif task_type == "merge_and_allocate" and status == "completed":
+                    await _handle_merge_result(data)
+                elif task_type == "watchlist_discovery" and status == "completed":
+                    await _handle_discovery_result(data)
+                elif task_type == "watchlist_prune" and status == "completed":
+                    await _handle_prune_result(data)
+                elif task_type == "news_consolidate" and status == "completed":
+                    await _handle_consolidate_result(data)
 
-            await broadcast("task_update", {
-                "task_id": task_id,
-                "task_type": task_type,
-                "status": status,
-                "ticker": data.get("ticker"),
-            })
+                await broadcast("task_update", {
+                    "task_id": task_id,
+                    "task_type": task_type,
+                    "status": status,
+                    "ticker": data.get("ticker"),
+                })
+
+            except Exception:
+                logger.exception("Error processing result for task %s (%s)", task_id, task_type)
 
     except asyncio.CancelledError:
         pass
