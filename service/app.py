@@ -725,6 +725,24 @@ async def _handle_discovery_result(data: dict):
                     "reason": reasoning,
                 })
 
+                # Trigger full analysis for the newly discovered ticker
+                from pathlib import Path
+                state_file = Path("reports") / "_states" / f"{ticker.upper()}.json"
+                if not state_file.exists():
+                    task_id = await _scheduler.submit(TaskSpec(
+                        model_tier="deep",
+                        task_type="full_analysis",
+                        payload={"ticker": ticker.upper()},
+                        ticker=ticker.upper(),
+                    ))
+                    async with get_db_session() as session:
+                        session.add(GpuTask(
+                            task_id=task_id, model_tier="deep", task_type="full_analysis",
+                            ticker=ticker.upper(), priority=1, status=TaskStatus.queued,
+                            payload={"ticker": ticker.upper()},
+                        ))
+                        await session.commit()
+
     if article_id:
         new_status = InvestigationStatus.escalated if should_add else InvestigationStatus.quick_no_action
         async with get_db_session() as session:
