@@ -279,6 +279,8 @@ class GpuWorker:
             deep_model=self.config.gpu.deep_model,
             backend_url=ollama_base,
         )
+        config["data_vendors"]["news_data"] = "database"
+        config["database_path"] = str(Path(self.config.database_path).resolve())
 
         result = run_single_ticker(
             ticker=ticker,
