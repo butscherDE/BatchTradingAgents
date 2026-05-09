@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api, TaskItem, TaskStats, fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc, formatTime } from '../api/time'
@@ -36,6 +36,30 @@ export default function Tasks() {
     if (typeFilter && t.task_type !== typeFilter) return false
     if (tickerFilter && !(t.ticker || '').toLowerCase().includes(tickerFilter.toLowerCase())) return false
     return true
+  })
+
+  const cancelMutation = useMutation({
+    mutationFn: (taskId: string) =>
+      fetch(`/api/tasks/${taskId}/cancel`, { method: 'POST' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+    },
+  })
+
+  const cancelAllMutation = useMutation({
+    mutationFn: () =>
+      fetch('/api/tasks/cancel-all', { method: 'POST' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+    },
   })
 
   useEffect(() => {
@@ -91,6 +115,7 @@ export default function Tasks() {
           <option value="running">Running</option>
           <option value="completed">Completed</option>
           <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
         </select>
         <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(0) }}>
           <option value="">All types</option>
@@ -111,6 +136,13 @@ export default function Tasks() {
           onChange={e => { setTickerFilter(e.target.value); setPage(0) }}
           style={{ width: 100 }}
         />
+        <button
+          onClick={() => { if (confirm('Cancel all queued tasks?')) cancelAllMutation.mutate() }}
+          disabled={cancelAllMutation.isPending}
+          style={{ background: 'var(--red)', marginLeft: 'auto' }}
+        >
+          Cancel All Queued
+        </button>
       </div>
 
       {isLoading ? <p>Loading...</p> : (
@@ -125,6 +157,7 @@ export default function Tasks() {
                 <th>Status</th>
                 <th>Duration</th>
                 <th>Error</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
@@ -146,6 +179,16 @@ export default function Tasks() {
                     <td>{duration}</td>
                     <td style={{ color: 'var(--red)', fontSize: 12, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {t.error ?? ''}
+                    </td>
+                    <td>
+                      {(t.status === 'queued' || t.status === 'running') && (
+                        <button
+                          onClick={() => cancelMutation.mutate(t.task_id)}
+                          style={{ background: 'var(--red)', fontSize: 11, padding: '2px 6px' }}
+                        >
+                          cancel
+                        </button>
+                      )}
                     </td>
                   </tr>
                 )

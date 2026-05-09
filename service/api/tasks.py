@@ -79,3 +79,61 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
         worker_state=worker_status.get("state") if worker_status else None,
         model_switches=worker_status.get("model_switches", 0) if worker_status else 0,
     )
+
+
+@router.post("/{task_id}/cancel")
+async def cancel_task(task_id: str, session: AsyncSession = Depends(get_session)):
+    """Cancel a queued or running task."""
+    from fastapi import HTTPException
+
+    result = await session.execute(
+        select(GpuTask).where(GpuTask.task_id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    status_val = task.status.value if hasattr(task.status, "value") else task.status
+    if status_val not in ("queued", "running"):
+        raise HTTPException(status_code=409, detail=f"Task is '{status_val}', cannot cancel")
+
+    if status_val == "queued":
+        # Remove from Redis queue and mark cancelled
+        from service.app import get_scheduler
+        scheduler = get_scheduler()
+        await scheduler.remove_task(task.task_id, task.model_tier)
+
+    # Mark cancelled in DB (for running tasks, worker will check on next iteration)
+    task.status = TaskStatus.cancelled
+    task.completed_at = __import__("datetime").datetime.utcnow()
+    await session.commit()
+
+    # Publish cancel signal for running tasks
+    if status_val == "running":
+        from service.app import get_scheduler
+        scheduler = get_scheduler()
+        await scheduler.publish_cancel(task.task_id)
+
+    return {"cancelled": task.task_id, "was": status_val}
+
+
+@router.post("/cancel-all")
+async def cancel_all_queued(session: AsyncSession = Depends(get_session)):
+    """Cancel all queued tasks. Running tasks are not affected."""
+    from sqlalchemy import update
+    import datetime
+
+    # Clear Redis queues
+    from service.app import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.clear_queues()
+
+    # Mark all queued tasks as cancelled in DB
+    result = await session.execute(
+        update(GpuTask)
+        .where(GpuTask.status == TaskStatus.queued)
+        .values(status=TaskStatus.cancelled, completed_at=datetime.datetime.utcnow())
+    )
+    await session.commit()
+
+    return {"cancelled_count": result.rowcount}

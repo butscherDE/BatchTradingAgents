@@ -1,7 +1,7 @@
 import datetime
 import enum
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, Text, JSON, Enum, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase
 
 
@@ -24,6 +24,7 @@ class TaskStatus(str, enum.Enum):
     running = "running"
     completed = "completed"
     failed = "failed"
+    cancelled = "cancelled"
 
 
 class NewsArticle(Base):
@@ -78,14 +79,18 @@ class TradeAction(Base):
 
 class WatchlistTicker(Base):
     __tablename__ = "watchlist_tickers"
+    __table_args__ = (
+        UniqueConstraint("account_id", "symbol", name="uq_watchlist_account_symbol"),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    symbol = Column(String, unique=True, nullable=False)
-    added_by = Column(String, nullable=False, default="manual")  # "manual", "auto_discovery"
+    account_id = Column(String, nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    added_by = Column(String, nullable=False, default="manual")
     added_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
     removed_at = Column(DateTime, nullable=True)
     remove_reason = Column(Text, nullable=True)
-    active = Column(Integer, nullable=False, default=1)  # 1=active, 0=pruned
+    active = Column(Integer, nullable=False, default=1)
 
 
 class ProposalStatus(str, enum.Enum):

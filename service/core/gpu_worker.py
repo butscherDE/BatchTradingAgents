@@ -97,6 +97,10 @@ class GpuWorker:
         task_type = task["task_type"]
         ticker = task.get("ticker")
 
+        # Check if task was already cancelled before we start
+        if self._is_cancelled(task_id):
+            return
+
         self._publish_status("executing", f"{task_type} for {ticker or 'N/A'}")
 
         started_at = datetime.datetime.utcnow().isoformat()
@@ -347,6 +351,10 @@ class GpuWorker:
             "allocation_reasoning": allocation_reasoning,
             "cash_pct": allocation_plan.cash_pct if 'allocation_plan' in dir() else None,
         }
+
+    def _is_cancelled(self, task_id: str) -> bool:
+        """Check if a cancel signal exists for this task."""
+        return bool(self._redis.get(f"gpu:cancel:{task_id}"))
 
     def _publish_status(self, state: str, message: str):
         status = {

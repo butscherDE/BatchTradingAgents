@@ -66,6 +66,28 @@ class GpuScheduler:
             return json.loads(raw)
         return None
 
+    async def remove_task(self, task_id: str, model_tier: str):
+        """Remove a specific task from its Redis queue (best-effort)."""
+        queue = QUICK_QUEUE if model_tier == "quick" else DEEP_QUEUE
+        items = await self._redis.lrange(queue, 0, -1)
+        for item in items:
+            try:
+                data = json.loads(item)
+                if data.get("task_id") == task_id:
+                    await self._redis.lrem(queue, 1, item)
+                    return
+            except (json.JSONDecodeError, TypeError):
+                continue
+
+    async def publish_cancel(self, task_id: str):
+        """Publish a cancel signal for a running task."""
+        await self._redis.set(f"gpu:cancel:{task_id}", "1", ex=300)
+
+    async def clear_queues(self):
+        """Delete all tasks from both queues."""
+        await self._redis.delete(QUICK_QUEUE)
+        await self._redis.delete(DEEP_QUEUE)
+
     async def publish_result(self, task_id: str, result: dict):
         await self._redis.publish(RESULT_CHANNEL, json.dumps({
             "task_id": task_id,
