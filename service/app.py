@@ -193,6 +193,13 @@ async def _handle_news_article(article: dict):
 
     symbols = article.get("symbols", [])
 
+    # Skip excluded tickers entirely
+    if _config and _config.watchlist.exclude:
+        exclude_set = {s.upper() for s in _config.watchlist.exclude}
+        symbols = [s for s in symbols if s.upper() not in exclude_set]
+        if not symbols:
+            return
+
     # Check which accounts actively watch any of the article's symbols
     affected_accounts = []
     if symbols:

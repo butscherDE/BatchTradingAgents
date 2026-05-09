@@ -25,6 +25,7 @@ class WatchlistConfig(BaseSettings):
     dynamic_discovery: bool = False
     auto_prune: bool = False
     tickers: list[str] = []
+    exclude: list[str] = []
 
 
 class AccountConfig(BaseSettings):
@@ -91,6 +92,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             dynamic_discovery=watchlist_raw.get("dynamic_discovery", False),
             auto_prune=watchlist_raw.get("auto_prune", False),
             tickers=watchlist_raw.get("tickers", []),
+            exclude=watchlist_raw.get("exclude", []),
         ),
         accounts=accounts,
         news_symbols=streams_raw.get("news_symbols", ["*"]),
