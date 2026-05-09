@@ -742,6 +742,33 @@ async def _handle_discovery_result(data: dict):
                             payload={"ticker": ticker.upper()},
                         ))
                         await session.commit()
+                elif article_id:
+                    # Report exists — screen the news article against it
+                    async with get_db_session() as session:
+                        from sqlalchemy import select as sa_select
+                        art_result = await session.execute(
+                            sa_select(NewsArticle).where(NewsArticle.id == article_id)
+                        )
+                        art = art_result.scalar_one_or_none()
+                    if art:
+                        task_id = await _scheduler.submit(TaskSpec(
+                            model_tier="quick",
+                            task_type="news_screen",
+                            payload={
+                                "article_id": article_id,
+                                "headline": art.headline,
+                                "summary": art.summary or "",
+                                "symbols": art.symbols or [ticker.upper()],
+                            },
+                            ticker=ticker.upper(),
+                        ))
+                        async with get_db_session() as session:
+                            session.add(GpuTask(
+                                task_id=task_id, model_tier="quick", task_type="news_screen",
+                                ticker=ticker.upper(), priority=1, status=TaskStatus.queued,
+                                payload={"article_id": article_id},
+                            ))
+                            await session.commit()
 
     if article_id:
         new_status = InvestigationStatus.escalated if should_add else InvestigationStatus.quick_no_action
