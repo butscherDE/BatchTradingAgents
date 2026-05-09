@@ -921,8 +921,8 @@ async def _on_debounce_fire(account_id: str, tickers: list[str]):
         try:
             from cli.alpaca_client import create_client, fetch_portfolio
             client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
-            port, _, _, _ = fetch_portfolio(client)
-            portfolio = {"holdings": port.holdings, "cash": port.cash}
+            port, _, prices, _ = fetch_portfolio(client)
+            portfolio = {"holdings": port.holdings, "cash": port.cash, "prices": prices}
         except Exception:
             pass
 

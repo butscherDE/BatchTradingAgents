@@ -335,20 +335,23 @@ class GpuWorker:
                     "holdings": portfolio.get("holdings", {}),
                     "cash": portfolio.get("cash", 0),
                 }
-                # Fetch live quotes for all tickers (for order sizing + display)
-                quotes = {}
+                # Start with prices from portfolio fetch (most accurate for held positions)
+                quotes = dict(portfolio.get("prices", {}))
+
+                # Fetch additional quotes for tickers not already priced
                 try:
                     from cli.alpaca_client import create_client, fetch_quotes
                     acct = self.config.accounts.get(account_id)
                     if acct:
-                        client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
-                        # Get quotes for watchlist tickers + any held positions
                         all_symbols = list(set(
                             [t["ticker"] for t in tickers_data] +
                             list(portfolio_dict["holdings"].keys())
                         ))
-                        live_quotes = fetch_quotes(client, all_symbols)
-                        quotes.update(live_quotes)
+                        missing = [s for s in all_symbols if s not in quotes]
+                        if missing:
+                            client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+                            live_quotes = fetch_quotes(client, missing)
+                            quotes.update(live_quotes)
                 except Exception:
                     pass
 
