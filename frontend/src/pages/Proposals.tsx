@@ -23,7 +23,7 @@ interface ProposalDetail {
   merge_report: string
   tickers: string[]
   ticker_data: { ticker: string; decision: string; reasoning: string }[]
-  allocation: { symbol: string; action: string; current_pct: number; target_pct: number; current_value: number; target_value: number; current_qty: number; price: number | null }[] | null
+  allocation: { symbol: string; action: string; current_pct?: number; target_pct?: number; pct?: number; current_value?: number; target_value?: number; current_qty?: number; price?: number | null }[] | null
   allocation_reasoning: string | null
   cash_pct: number | null
   portfolio_value: number | null
@@ -285,10 +285,10 @@ export default function Proposals() {
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{a.symbol}</td>
                       <td className={a.action === 'buy' ? 'positive' : a.action === 'sell' ? 'negative' : ''}>{a.action}</td>
-                      <td>{a.current_pct.toFixed(1)}%</td>
-                      <td style={{ fontWeight: 600 }}>{a.target_pct.toFixed(1)}%</td>
-                      <td>${a.current_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
-                      <td style={{ fontWeight: 600 }}>${a.target_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td>{a.current_pct != null ? `${a.current_pct.toFixed(1)}%` : '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{(a.target_pct ?? a.pct ?? 0).toFixed(1)}%</td>
+                      <td>{a.current_value != null ? `$${a.current_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{a.target_value != null ? `$${a.target_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}` : '—'}</td>
                       <td>{a.price ? `$${a.price.toFixed(2)}` : '—'}</td>
                     </tr>
                   ))}
