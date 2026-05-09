@@ -88,6 +88,17 @@ class GpuScheduler:
         await self._redis.delete(QUICK_QUEUE)
         await self._redis.delete(DEEP_QUEUE)
 
+    async def pause(self):
+        """Pause the GPU worker (finishes current task, then waits)."""
+        await self._redis.set("gpu:paused", "1")
+
+    async def resume(self):
+        """Resume the GPU worker."""
+        await self._redis.delete("gpu:paused")
+
+    async def is_paused(self) -> bool:
+        return bool(await self._redis.get("gpu:paused"))
+
     async def pop_result(self, timeout: float = 1.0) -> dict | None:
         """Pop a result from the results queue. Returns None if empty after timeout."""
         result = await self._redis.blpop(RESULT_QUEUE, timeout=timeout)

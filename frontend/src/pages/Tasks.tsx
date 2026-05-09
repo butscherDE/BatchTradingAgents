@@ -111,6 +111,17 @@ export default function Tasks() {
         <div className="stat-card">
           <h3>Worker State</h3>
           <div className="value" style={{ fontSize: 16 }}>{stats?.worker_state ?? 'unknown'}</div>
+          <button
+            onClick={() => {
+              const action = stats?.worker_state === 'paused' ? 'resume' : 'pause'
+              fetch(`/api/tasks/${action}`, { method: 'POST' }).then(() =>
+                queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+              )
+            }}
+            style={{ marginTop: 8, fontSize: 11, background: stats?.worker_state === 'paused' ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
+          >
+            {stats?.worker_state === 'paused' ? 'Resume' : 'Pause'}
+          </button>
         </div>
         <div className="stat-card">
           <h3>Current Model</h3>

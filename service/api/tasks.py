@@ -81,6 +81,22 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
     )
 
 
+@router.post("/pause")
+async def pause_worker():
+    from service.app import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.pause()
+    return {"paused": True}
+
+
+@router.post("/resume")
+async def resume_worker():
+    from service.app import get_scheduler
+    scheduler = get_scheduler()
+    await scheduler.resume()
+    return {"paused": False}
+
+
 @router.get("/{task_id}")
 async def get_task_detail(task_id: str, session: AsyncSession = Depends(get_session)):
     """Get full task detail including result JSON."""

@@ -34,6 +34,12 @@ class GpuWorker:
         self._publish_status("starting", "Worker starting up")
 
         while self._running:
+            # Check if paused
+            if self._is_paused():
+                self._publish_status("paused", "Paused — waiting for resume")
+                time.sleep(2)
+                continue
+
             queue, tier = self._pick_queue()
             if queue is None:
                 self._publish_status("idle", "Waiting for tasks")
@@ -464,6 +470,10 @@ class GpuWorker:
     def _is_cancelled(self, task_id: str) -> bool:
         """Check if a cancel signal exists for this task."""
         return bool(self._redis.get(f"gpu:cancel:{task_id}"))
+
+    def _is_paused(self) -> bool:
+        """Check if the worker is paused."""
+        return bool(self._redis.get("gpu:paused"))
 
     def _publish_status(self, state: str, message: str):
         status = {
