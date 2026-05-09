@@ -114,8 +114,31 @@ class GpuWorker:
             "started_at": started_at,
         }))
 
+        # Run dispatch in a thread so we can check for cancellation
+        import concurrent.futures
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        future = executor.submit(self._dispatch, task_type, task.get("payload", {}))
+
         try:
-            result = self._dispatch(task_type, task.get("payload", {}))
+            while True:
+                try:
+                    result = future.result(timeout=2.0)
+                    break
+                except concurrent.futures.TimeoutError:
+                    if self._is_cancelled(task_id):
+                        future.cancel()
+                        executor.shutdown(wait=False)
+                        self._redis.publish(RESULT_CHANNEL, json.dumps({
+                            "task_id": task_id,
+                            "task_type": task_type,
+                            "ticker": ticker,
+                            "status": "failed",
+                            "error": "Cancelled by user",
+                            "started_at": started_at,
+                            "completed_at": datetime.datetime.utcnow().isoformat(),
+                        }))
+                        return
+
             self._redis.publish(RESULT_CHANNEL, json.dumps({
                 "task_id": task_id,
                 "task_type": task_type,
@@ -137,6 +160,8 @@ class GpuWorker:
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
             }))
+        finally:
+            executor.shutdown(wait=False)
 
     def _dispatch(self, task_type: str, payload: dict) -> dict:
         if task_type == "news_screen":
