@@ -47,10 +47,11 @@ def _run_migrations(db_path: str):
     """Run Alembic upgrade head synchronously."""
     from alembic.config import Config
     from alembic import command
+    import logging
 
     alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
     alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
     try:
         command.upgrade(alembic_cfg, "head")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"Alembic migration failed (may be fine on fresh DB): {e}")
