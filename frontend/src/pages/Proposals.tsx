@@ -23,9 +23,11 @@ interface ProposalDetail {
   merge_report: string
   tickers: string[]
   ticker_data: { ticker: string; decision: string; reasoning: string }[]
-  allocation: { symbol: string; action: string; pct: number }[] | null
+  allocation: { symbol: string; action: string; current_pct: number; target_pct: number; current_value: number; target_value: number; current_qty: number; price: number | null }[] | null
   allocation_reasoning: string | null
   cash_pct: number | null
+  portfolio_value: number | null
+  cash_after: number | null
   proposed_orders: { ticker: string; side: string; qty?: number; notional?: number }[] | null
   superseded_by: number | null
   created_at: string
@@ -193,41 +195,52 @@ export default function Proposals() {
           {detail.allocation && detail.allocation.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>ALLOCATION PLAN</h3>
+              {detail.portfolio_value && (
+                <div style={{ display: 'flex', gap: 24, marginBottom: 8, fontSize: 13 }}>
+                  <span>Portfolio: <strong>${detail.portfolio_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>
+                  {detail.cash_after != null && <span>Cash after: <strong>${detail.cash_after.toLocaleString(undefined, { maximumFractionDigits: 0 })}</strong></span>}
+                </div>
+              )}
               {detail.allocation_reasoning && (
                 <p style={{ fontSize: 13, color: 'var(--text-dim)', marginBottom: 8 }}>{detail.allocation_reasoning}</p>
               )}
               <table>
                 <thead>
-                  <tr><th>Ticker</th><th>Action</th><th>Target %</th><th style={{ width: 200 }}>Bar</th></tr>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Action</th>
+                    <th>Before %</th>
+                    <th>After %</th>
+                    <th>Before $</th>
+                    <th>After $</th>
+                    <th>Price</th>
+                  </tr>
                 </thead>
                 <tbody>
                   {detail.allocation.map((a, i) => (
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{a.symbol}</td>
                       <td className={a.action === 'buy' ? 'positive' : a.action === 'sell' ? 'negative' : ''}>{a.action}</td>
-                      <td>{a.pct.toFixed(1)}%</td>
-                      <td>
-                        <div style={{ background: 'var(--border)', borderRadius: 3, height: 16, width: '100%' }}>
-                          <div style={{
-                            background: a.action === 'buy' ? 'var(--green)' : a.action === 'sell' ? 'var(--red)' : 'var(--text-dim)',
-                            width: `${Math.min(a.pct, 100)}%`,
-                            height: '100%',
-                            borderRadius: 3,
-                          }} />
-                        </div>
-                      </td>
+                      <td>{a.current_pct.toFixed(1)}%</td>
+                      <td style={{ fontWeight: 600 }}>{a.target_pct.toFixed(1)}%</td>
+                      <td>${a.current_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td style={{ fontWeight: 600 }}>${a.target_value.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+                      <td>{a.price ? `$${a.price.toFixed(2)}` : '—'}</td>
                     </tr>
                   ))}
                   {detail.cash_pct != null && (
-                    <tr>
+                    <tr style={{ borderTop: '2px solid var(--border)' }}>
                       <td style={{ fontWeight: 600 }}>CASH</td>
-                      <td>hold</td>
-                      <td>{detail.cash_pct.toFixed(1)}%</td>
-                      <td>
-                        <div style={{ background: 'var(--border)', borderRadius: 3, height: 16, width: '100%' }}>
-                          <div style={{ background: 'var(--yellow)', width: `${Math.min(detail.cash_pct, 100)}%`, height: '100%', borderRadius: 3 }} />
-                        </div>
-                      </td>
+                      <td>—</td>
+                      <td>{detail.portfolio_value && detail.cash_after != null
+                        ? ((detail.portfolio_value - detail.allocation.reduce((s, a) => s + a.current_value, 0)) / detail.portfolio_value * 100).toFixed(1) + '%'
+                        : '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{detail.cash_pct.toFixed(1)}%</td>
+                      <td>{detail.portfolio_value
+                        ? '$' + (detail.portfolio_value - detail.allocation.reduce((s, a) => s + a.current_value, 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                        : '—'}</td>
+                      <td style={{ fontWeight: 600 }}>{detail.cash_after != null ? '$' + detail.cash_after.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}</td>
+                      <td>—</td>
                     </tr>
                   )}
                 </tbody>

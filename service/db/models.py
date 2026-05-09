@@ -126,6 +126,8 @@ class TradeProposal(Base):
     allocation_reasoning = Column(Text, nullable=True)
     cash_pct = Column(Float, nullable=True)
     proposed_orders = Column(JSON, nullable=True)  # [{ticker, side, qty}]
+    portfolio_value = Column(Float, nullable=True)
+    cash_after = Column(Float, nullable=True)
     source_task_id = Column(String, nullable=True)
     superseded_by = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)

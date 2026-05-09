@@ -360,14 +360,30 @@ class GpuWorker:
                     strategy=strategy,
                 )
 
-                allocation_data = [
-                    {
+                # Compute current allocations for comparison
+                holdings = portfolio_dict.get("holdings", {})
+                cash = portfolio_dict.get("cash", 0)
+                portfolio_value = sum(holdings.get(s, 0) * quotes.get(s, 0) for s in holdings) + cash
+
+                allocation_data = []
+                for a in allocation_plan.allocations:
+                    current_qty = holdings.get(a.symbol, 0)
+                    current_price = quotes.get(a.symbol, 0)
+                    current_value = current_qty * current_price
+                    current_pct = (current_value / portfolio_value * 100) if portfolio_value > 0 else 0
+                    target_value = portfolio_value * a.pct / 100 if portfolio_value > 0 else 0
+
+                    allocation_data.append({
                         "symbol": a.symbol,
                         "action": a.action,
-                        "pct": a.pct,
-                    }
-                    for a in allocation_plan.allocations
-                ]
+                        "current_pct": round(current_pct, 2),
+                        "target_pct": round(a.pct, 2),
+                        "current_value": round(current_value, 2),
+                        "target_value": round(target_value, 2),
+                        "current_qty": current_qty,
+                        "price": round(current_price, 2) if current_price else None,
+                    })
+
                 allocation_reasoning = allocation_plan.reasoning
 
                 proposed_orders = [
@@ -380,6 +396,7 @@ class GpuWorker:
                 ]
             except Exception as e:
                 allocation_reasoning = f"Allocation failed: {e}"
+                portfolio_value = 0
 
         return {
             "account_id": account_id,
@@ -398,6 +415,8 @@ class GpuWorker:
             "allocation": allocation_data,
             "allocation_reasoning": allocation_reasoning,
             "cash_pct": allocation_plan.cash_pct if 'allocation_plan' in dir() else None,
+            "portfolio_value": portfolio_value if 'portfolio_value' in dir() else None,
+            "cash_after": (portfolio_value * allocation_plan.cash_pct / 100) if 'allocation_plan' in dir() and 'portfolio_value' in dir() and portfolio_value else None,
         }
 
     def _is_cancelled(self, task_id: str) -> bool:

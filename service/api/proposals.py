@@ -42,6 +42,8 @@ class ProposalDetail(BaseModel):
     allocation: Optional[list[dict]] = None
     allocation_reasoning: Optional[str] = None
     cash_pct: Optional[float] = None
+    portfolio_value: Optional[float] = None
+    cash_after: Optional[float] = None
     proposed_orders: Optional[list[dict]] = None
     source_task_id: Optional[str] = None
     superseded_by: Optional[int] = None
@@ -101,6 +103,8 @@ async def get_proposal(proposal_id: int, session: AsyncSession = Depends(get_ses
         allocation=p.allocation,
         allocation_reasoning=p.allocation_reasoning,
         cash_pct=p.cash_pct,
+        portfolio_value=p.portfolio_value,
+        cash_after=p.cash_after,
         proposed_orders=p.proposed_orders,
         source_task_id=p.source_task_id,
         superseded_by=p.superseded_by,
