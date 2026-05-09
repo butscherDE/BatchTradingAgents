@@ -335,22 +335,19 @@ class GpuWorker:
                     "holdings": portfolio.get("holdings", {}),
                     "cash": portfolio.get("cash", 0),
                 }
-                # Get current prices for order sizing
+                # Fetch live quotes for all tickers (for order sizing + display)
                 quotes = {}
-                for t in tickers_data:
-                    fs = t.get("final_state", {})
-                    # Try to get price from the state if available
-                    if "current_price" in t:
-                        quotes[t["ticker"]] = t["current_price"]
-
-                # Fetch live quotes if available
                 try:
                     from cli.alpaca_client import create_client, fetch_quotes
-                    from service.app import _config
-                    acct = _config.accounts.get(account_id) if _config else None
+                    acct = self.config.accounts.get(account_id)
                     if acct:
                         client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
-                        live_quotes = fetch_quotes(client, [t["ticker"] for t in tickers_data])
+                        # Get quotes for watchlist tickers + any held positions
+                        all_symbols = list(set(
+                            [t["ticker"] for t in tickers_data] +
+                            list(portfolio_dict["holdings"].keys())
+                        ))
+                        live_quotes = fetch_quotes(client, all_symbols)
                         quotes.update(live_quotes)
                 except Exception:
                     pass

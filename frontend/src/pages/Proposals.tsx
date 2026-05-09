@@ -281,7 +281,7 @@ export default function Proposals() {
                   </tr>
                 </thead>
                 <tbody>
-                  {detail.allocation.map((a, i) => (
+                  {detail.allocation.filter(a => a.symbol.toUpperCase() !== 'CASH').map((a, i) => (
                     <tr key={i}>
                       <td style={{ fontWeight: 600 }}>{a.symbol}</td>
                       <td className={a.action === 'buy' ? 'positive' : a.action === 'sell' ? 'negative' : ''}>{a.action}</td>
@@ -293,15 +293,15 @@ export default function Proposals() {
                     </tr>
                   ))}
                   {detail.cash_pct != null && (
-                    <tr style={{ borderTop: '2px solid var(--border)' }}>
-                      <td style={{ fontWeight: 600 }}>CASH</td>
-                      <td>—</td>
-                      <td>{detail.portfolio_value && detail.cash_after != null
-                        ? ((detail.portfolio_value - detail.allocation.reduce((s, a) => s + a.current_value, 0)) / detail.portfolio_value * 100).toFixed(1) + '%'
+                    <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--border)' }}>
+                      <td style={{ fontWeight: 600, fontStyle: 'italic', color: 'var(--yellow)' }}>Cash Reserve</td>
+                      <td style={{ color: 'var(--text-dim)' }}>—</td>
+                      <td>{detail.portfolio_value && detail.cash_after != null && detail.allocation
+                        ? ((detail.portfolio_value - detail.allocation.reduce((s, a) => s + (a.current_value || 0), 0)) / detail.portfolio_value * 100).toFixed(1) + '%'
                         : '—'}</td>
                       <td style={{ fontWeight: 600 }}>{detail.cash_pct.toFixed(1)}%</td>
-                      <td>{detail.portfolio_value
-                        ? '$' + (detail.portfolio_value - detail.allocation.reduce((s, a) => s + a.current_value, 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })
+                      <td>{detail.portfolio_value && detail.allocation
+                        ? '$' + (detail.portfolio_value - detail.allocation.reduce((s, a) => s + (a.current_value || 0), 0)).toLocaleString(undefined, { maximumFractionDigits: 0 })
                         : '—'}</td>
                       <td style={{ fontWeight: 600 }}>{detail.cash_after != null ? '$' + detail.cash_after.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}</td>
                       <td>—</td>
