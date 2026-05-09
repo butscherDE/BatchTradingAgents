@@ -692,6 +692,7 @@ async def _handle_discovery_result(data: dict):
             article_id = task.payload.get("article_id")
 
     if should_add and ticker and account_id:
+        added_or_reactivated = False
         async with get_db_session() as session:
             from sqlalchemy import select
             existing = await session.execute(
@@ -719,6 +720,7 @@ async def _handle_discovery_result(data: dict):
                     reasoning=reasoning,
                 ))
                 await session.commit()
+                added_or_reactivated = True
                 logger.info(f"Reactivated {ticker} on {account_id} watchlist: {reasoning}")
             else:
                 # New ticker
@@ -737,9 +739,10 @@ async def _handle_discovery_result(data: dict):
                     reasoning=reasoning,
                 ))
                 await session.commit()
+                added_or_reactivated = True
                 logger.info(f"Auto-added {ticker} to {account_id} watchlist: {reasoning}")
 
-            if not (row and row.active):
+            if added_or_reactivated:
                 await broadcast("watchlist_changed", {
                     "action": "added",
                     "symbol": ticker.upper(),
