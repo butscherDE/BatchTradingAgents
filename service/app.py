@@ -27,6 +27,22 @@ _debouncer: MergeDebouncer | None = None
 _latest_reports: dict[str, dict] = {}  # ticker -> latest analysis result
 _orphaned_tasks: list = []  # tasks recovered from crash
 
+_news_source_health: dict = {
+    "alpaca": {
+        "status": "unknown",
+        "last_message_at": None,
+        "error": None,
+    },
+    "yfinance": {
+        "status": "stopped",
+        "last_poll_at": None,
+        "last_error": None,
+        "consecutive_failures": 0,
+        "tickers_total": 0,
+        "articles_found": 0,
+    },
+}
+
 
 def get_scheduler() -> GpuScheduler:
     assert _scheduler is not None
@@ -159,20 +175,34 @@ async def lifespan(app: FastAPI):
         result_task = None
 
     # News stream (single connection — Alpaca connection limit)
-    stream_manager = StreamManager(_config, on_news=_handle_news_article)
+    def _alpaca_status(status: str, error: str | None):
+        _news_source_health["alpaca"]["status"] = status
+        if error:
+            _news_source_health["alpaca"]["error"] = error
+
+    stream_manager = StreamManager(_config, on_news=_handle_news_article, on_stream_status=_alpaca_status)
     try:
         await stream_manager.start()
     except Exception as e:
+        _news_source_health["alpaca"]["status"] = "error"
+        _news_source_health["alpaca"]["error"] = str(e)
         logger.warning(f"News stream failed to start: {e}")
 
     # Daily prune scheduler
     prune_task = asyncio.create_task(_prune_scheduler())
+
+    # yfinance periodic news poller
+    yfinance_task = None
+    if _config.polling.yfinance_enabled:
+        yfinance_task = asyncio.create_task(_yfinance_poller())
 
     logger.info(f"Service started on {_config.host}:{_config.port}")
     yield
 
     # Shutdown
     prune_task.cancel()
+    if yfinance_task:
+        yfinance_task.cancel()
 
     # Shutdown
     if result_task:
@@ -188,10 +218,15 @@ async def lifespan(app: FastAPI):
 async def _handle_news_article(article: dict):
     """Called by stream manager when a new news article arrives."""
     from service.api.ws import broadcast
+    from service.core.headline_hash import compute_headline_hash
     from service.db.models import WatchlistTicker
     from sqlalchemy import select
 
     symbols = article.get("symbols", [])
+
+    if article.get("alpaca_id"):
+        _news_source_health["alpaca"]["status"] = "connected"
+        _news_source_health["alpaca"]["last_message_at"] = datetime.datetime.utcnow().isoformat()
 
     # Skip excluded tickers entirely
     if _config and _config.watchlist.exclude:
@@ -230,6 +265,7 @@ async def _handle_news_article(article: dict):
     async with get_db_session() as session:
         db_article = NewsArticle(
             alpaca_id=article.get("alpaca_id"),
+            headline_hash=compute_headline_hash(article["headline"]),
             headline=article["headline"],
             summary=article.get("summary"),
             source=article.get("source"),
@@ -1115,6 +1151,139 @@ async def _run_prune_for_account(account_name: str, acct):
             await session.commit()
 
 
+def _fetch_yfinance_news(ticker: str, count: int = 10) -> list[dict]:
+    """Synchronous yfinance fetch — run in thread pool."""
+    import yfinance as yf
+
+    stock = yf.Ticker(ticker)
+    news = stock.get_news(count=count)
+    if not news:
+        return []
+
+    articles = []
+    for article in news:
+        if "content" in article:
+            content = article["content"]
+            headline = content.get("title", "")
+            summary = content.get("summary", "")
+            provider = content.get("provider", {})
+            source = provider.get("displayName", "yfinance")
+            pub_date_str = content.get("pubDate", "")
+            pub_date = None
+            if pub_date_str:
+                try:
+                    pub_date = datetime.datetime.fromisoformat(
+                        pub_date_str.replace("Z", "+00:00")
+                    ).isoformat()
+                except (ValueError, AttributeError):
+                    pass
+            symbols = [ticker]
+            for t in content.get("finance", {}).get("stockTickers", []):
+                sym = t.get("symbol", "")
+                if sym and sym not in symbols:
+                    symbols.append(sym)
+        else:
+            headline = article.get("title", "")
+            summary = article.get("summary", "")
+            source = article.get("publisher", "yfinance")
+            pub_date = None
+            symbols = [ticker]
+
+        if headline:
+            articles.append({
+                "headline": headline,
+                "summary": summary,
+                "source": source,
+                "published_at": pub_date,
+                "symbols": symbols,
+            })
+
+    return articles
+
+
+async def _yfinance_poller():
+    """Periodically fetch news from yfinance for all active watchlist tickers."""
+    from service.db.models import WatchlistTicker
+    from sqlalchemy import select
+
+    if not _config or not _config.polling.yfinance_enabled:
+        return
+
+    _news_source_health["yfinance"]["status"] = "running"
+    logger.info("yfinance poller started (interval=%dm)", _config.polling.yfinance_interval_minutes)
+
+    while True:
+        try:
+            async with get_db_session() as session:
+                result = await session.execute(
+                    select(WatchlistTicker.symbol).distinct().where(
+                        WatchlistTicker.active == 1
+                    )
+                )
+                tickers = list(result.scalars().all())
+
+            if not tickers:
+                await asyncio.sleep(60)
+                continue
+
+            _news_source_health["yfinance"]["tickers_total"] = len(tickers)
+
+            interval_seconds = _config.polling.yfinance_interval_minutes * 60
+            sleep_between = interval_seconds / len(tickers)
+
+            for ticker in tickers:
+                try:
+                    articles = await asyncio.to_thread(
+                        _fetch_yfinance_news, ticker,
+                        _config.polling.yfinance_articles_per_ticker
+                    )
+
+                    _news_source_health["yfinance"]["last_poll_at"] = (
+                        datetime.datetime.utcnow().isoformat()
+                    )
+                    _news_source_health["yfinance"]["consecutive_failures"] = 0
+
+                    for article_data in articles:
+                        await _handle_news_article(article_data)
+                        _news_source_health["yfinance"]["articles_found"] += 1
+
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    error_str = str(e)
+                    _news_source_health["yfinance"]["last_error"] = error_str
+                    _news_source_health["yfinance"]["consecutive_failures"] += 1
+
+                    if "429" in error_str or "Too Many Requests" in error_str:
+                        _news_source_health["yfinance"]["status"] = "backing_off"
+                        backoff = _config.polling.yfinance_backoff_seconds
+                        logger.warning("yfinance 429 on %s, backing off %ds", ticker, backoff)
+                        await asyncio.sleep(backoff)
+                        _news_source_health["yfinance"]["status"] = "running"
+                    else:
+                        logger.warning("yfinance error for %s: %s", ticker, e)
+
+                    if (_news_source_health["yfinance"]["consecutive_failures"]
+                            >= _config.polling.yfinance_max_failures):
+                        logger.error("yfinance: %d consecutive failures, sleeping 5m",
+                                     _config.polling.yfinance_max_failures)
+                        _news_source_health["yfinance"]["status"] = "backing_off"
+                        await asyncio.sleep(300)
+                        _news_source_health["yfinance"]["status"] = "running"
+                        _news_source_health["yfinance"]["consecutive_failures"] = 0
+
+                    continue
+
+                await asyncio.sleep(sleep_between)
+
+        except asyncio.CancelledError:
+            _news_source_health["yfinance"]["status"] = "stopped"
+            raise
+        except Exception as e:
+            logger.exception("yfinance poller loop error: %s", e)
+            await asyncio.sleep(60)
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title="TradingAgents Continuous Evaluation",
@@ -1129,6 +1298,7 @@ def create_app() -> FastAPI:
     from service.api.watchlist import router as watchlist_router
     from service.api.proposals import router as proposals_router
     from service.api.ws import router as ws_router
+    from service.api.status import router as status_router
 
     app.include_router(news_router)
     app.include_router(tasks_router)
@@ -1136,6 +1306,7 @@ def create_app() -> FastAPI:
     app.include_router(watchlist_router)
     app.include_router(proposals_router)
     app.include_router(ws_router)
+    app.include_router(status_router)
 
     @app.get("/")
     async def root():

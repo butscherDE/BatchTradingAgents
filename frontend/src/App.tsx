@@ -7,7 +7,7 @@ import Tasks from './pages/Tasks'
 import Watchlist from './pages/Watchlist'
 import Proposals from './pages/Proposals'
 import { WebSocketProvider, useWebSocket } from './api/websocket'
-import { fetchJson } from './api/client'
+import { fetchJson, NewsSourceStatus } from './api/client'
 import { useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -20,13 +20,29 @@ function Sidebar() {
     queryFn: () => fetchJson<{ id: number }[]>('/api/proposals?status=pending'),
   })
 
+  const { data: taskStats } = useQuery({
+    queryKey: ['taskStats'],
+    queryFn: () => fetchJson<{ worker_state: string | null }>('/api/tasks/stats'),
+    refetchInterval: 5000,
+  })
+
+  const { data: newsSources } = useQuery({
+    queryKey: ['newsSourceStatus'],
+    queryFn: () => fetchJson<NewsSourceStatus>('/api/status/news-sources'),
+    refetchInterval: 10000,
+  })
+
   useEffect(() => {
     if (lastMessage?.type === 'proposal_created' || lastMessage?.type === 'proposal_approved') {
       queryClient.invalidateQueries({ queryKey: ['pendingProposals'] })
     }
+    if (lastMessage?.type === 'task_update') {
+      queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+    }
   }, [lastMessage, queryClient])
 
   const pendingCount = proposals.length
+  const workerState = taskStats?.worker_state
 
   return (
     <nav className="sidebar">
@@ -39,7 +55,29 @@ function Sidebar() {
       <NavLink to="/watchlist">Watchlist</NavLink>
       <NavLink to="/accounts">Accounts</NavLink>
       <NavLink to="/holdings">Holdings</NavLink>
-      <NavLink to="/tasks">Tasks</NavLink>
+      <NavLink to="/tasks" className="nav-with-badge">
+        Tasks
+        {workerState && (
+          <span className={`nav-worker-state ${workerState === 'paused' || workerState === 'pausing' ? 'state-paused' : workerState === 'executing' ? 'state-running' : 'state-idle'}`}>
+            {workerState === 'paused' ? '⏸' : workerState === 'pausing' ? '⏸' : workerState === 'executing' ? '⚡' : '●'}
+          </span>
+        )}
+      </NavLink>
+      {newsSources && (
+        <div className="news-sources-status">
+          <div className="news-source-row">
+            <span className={`source-dot ${newsSources.alpaca.status === 'connected' ? 'dot-ok' : 'dot-err'}`} />
+            <span className="source-label">Alpaca</span>
+          </div>
+          <div className="news-source-row">
+            <span className={`source-dot ${newsSources.yfinance.status === 'running' ? 'dot-ok' : newsSources.yfinance.status === 'backing_off' ? 'dot-warn' : 'dot-err'}`} />
+            <span className="source-label">yfinance</span>
+            {newsSources.yfinance.consecutive_failures > 0 && (
+              <span className="source-failures">{newsSources.yfinance.consecutive_failures}</span>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   )
 }

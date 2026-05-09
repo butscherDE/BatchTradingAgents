@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
-import { api, TaskItem, TaskStats, fetchJson } from '../api/client'
+import { api, TaskItem, fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc, formatTime } from '../api/time'
 
@@ -36,6 +36,12 @@ export default function Tasks() {
   const { data: stats } = useQuery({
     queryKey: ['taskStats'],
     queryFn: api.getTaskStats,
+  })
+
+  const { data: newsSources } = useQuery({
+    queryKey: ['newsSourceStatus'],
+    queryFn: api.getNewsSourceStatus,
+    refetchInterval: 10000,
   })
 
   const queryParams = new URLSearchParams()
@@ -110,17 +116,24 @@ export default function Tasks() {
         </div>
         <div className="stat-card">
           <h3>Worker State</h3>
-          <div className="value" style={{ fontSize: 16 }}>{stats?.worker_state ?? 'unknown'}</div>
+          <div className="value" style={{ fontSize: 16 }}>
+            {stats?.worker_state ?? 'unknown'}
+          </div>
+          {stats?.worker_state === 'pausing' && (
+            <div style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 4 }}>
+              will pause after current task
+            </div>
+          )}
           <button
-            onClick={() => {
-              const action = stats?.worker_state === 'paused' ? 'resume' : 'pause'
-              fetch(`/api/tasks/${action}`, { method: 'POST' }).then(() =>
-                queryClient.invalidateQueries({ queryKey: ['taskStats'] })
-              )
+            onClick={async () => {
+              const isPausedOrPausing = stats?.worker_state === 'paused' || stats?.worker_state === 'pausing'
+              const action = isPausedOrPausing ? 'resume' : 'pause'
+              await fetch(`/api/tasks/${action}`, { method: 'POST' })
+              queryClient.invalidateQueries({ queryKey: ['taskStats'] })
             }}
-            style={{ marginTop: 8, fontSize: 11, background: stats?.worker_state === 'paused' ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
+            style={{ marginTop: 8, fontSize: 11, background: (stats?.worker_state === 'paused' || stats?.worker_state === 'pausing') ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
           >
-            {stats?.worker_state === 'paused' ? 'Resume' : 'Pause'}
+            {(stats?.worker_state === 'paused' || stats?.worker_state === 'pausing') ? 'Resume' : 'Pause'}
           </button>
         </div>
         <div className="stat-card">
@@ -134,6 +147,31 @@ export default function Tasks() {
         <div className="stat-card">
           <h3>WebSocket</h3>
           <div className="value" style={{ fontSize: 14 }}>{connected ? '🟢 connected' : '🔴 disconnected'}</div>
+        </div>
+        <div className="stat-card">
+          <h3>Alpaca Stream</h3>
+          <div className="value" style={{ fontSize: 14 }}>
+            {newsSources?.alpaca.status === 'connected' ? '🟢' : newsSources?.alpaca.status === 'unknown' ? '⚪' : '🔴'}{' '}
+            {newsSources?.alpaca.status ?? 'unknown'}
+          </div>
+          {newsSources?.alpaca.error && (
+            <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 4 }}>{newsSources.alpaca.error}</div>
+          )}
+        </div>
+        <div className="stat-card">
+          <h3>yfinance Poller</h3>
+          <div className="value" style={{ fontSize: 14 }}>
+            {newsSources?.yfinance.status === 'running' ? '🟢' : newsSources?.yfinance.status === 'backing_off' ? '🟡' : '🔴'}{' '}
+            {newsSources?.yfinance.status ?? 'stopped'}
+          </div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>
+            {newsSources ? `${newsSources.yfinance.tickers_total} tickers · ${newsSources.yfinance.articles_found} found` : ''}
+          </div>
+          {newsSources?.yfinance.last_error && (
+            <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 150 }}>
+              {newsSources.yfinance.last_error}
+            </div>
+          )}
         </div>
       </div>
 

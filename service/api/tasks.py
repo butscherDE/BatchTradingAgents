@@ -62,6 +62,7 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
     scheduler = get_scheduler()
     depths = await scheduler.get_queue_depths()
     worker_status = await scheduler.get_worker_status()
+    paused = await scheduler.is_paused()
 
     completed = await session.execute(
         select(func.count()).where(GpuTask.status == TaskStatus.completed)
@@ -70,13 +71,19 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
         select(func.count()).where(GpuTask.status == TaskStatus.failed)
     )
 
+    worker_state = worker_status.get("state") if worker_status else None
+    if paused and worker_state in ("executing", "switching_model"):
+        worker_state = "pausing"
+    elif paused:
+        worker_state = "paused"
+
     return TaskStats(
         queue_depth_quick=depths.get("quick", 0),
         queue_depth_deep=depths.get("deep", 0),
         total_completed=completed.scalar() or 0,
         total_failed=failed.scalar() or 0,
         current_model=worker_status.get("current_model") if worker_status else None,
-        worker_state=worker_status.get("state") if worker_status else None,
+        worker_state=worker_state,
         model_switches=worker_status.get("model_switches", 0) if worker_status else 0,
     )
 

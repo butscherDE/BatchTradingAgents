@@ -16,10 +16,12 @@ class StreamManager:
         config: ServiceConfig,
         on_news: Callable[[dict], Awaitable[None]],
         on_price_bar: Optional[Callable[[dict], Awaitable[None]]] = None,
+        on_stream_status: Optional[Callable[[str, str | None], None]] = None,
     ):
         self._config = config
         self._on_news = on_news
         self._on_price_bar = on_price_bar
+        self._on_stream_status = on_stream_status
         self._news_stream: AlpacaNewsStream | None = None
 
     async def start(self):
@@ -35,6 +37,7 @@ class StreamManager:
                 api_secret=account.api_secret,
                 symbols=self._config.news_symbols,
                 on_news=self._on_news,
+                on_status=self._on_stream_status,
             )
             await self._news_stream.start()
             logger.info(f"Started shared news stream using account: {name}")

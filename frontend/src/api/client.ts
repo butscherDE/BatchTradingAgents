@@ -1,5 +1,3 @@
-const BASE = ''
-
 export async function fetchJson<T>(path: string, params?: Record<string, string>): Promise<T> {
   const url = new URL(path, window.location.origin)
   if (params) {
@@ -87,6 +85,22 @@ export interface HealthResponse {
   uptime_seconds: number
 }
 
+export interface NewsSourceStatus {
+  alpaca: {
+    status: string
+    last_message_at: string | null
+    error: string | null
+  }
+  yfinance: {
+    status: string
+    last_poll_at: string | null
+    last_error: string | null
+    consecutive_failures: number
+    tickers_total: number
+    articles_found: number
+  }
+}
+
 export const api = {
   getNews: (params?: { limit?: string; status?: string; symbol?: string }) =>
     fetchJson<NewsArticle[]>('/api/news', params),
@@ -108,4 +122,7 @@ export const api = {
 
   getHealth: () =>
     fetchJson<HealthResponse>('/api/health'),
+
+  getNewsSourceStatus: () =>
+    fetchJson<NewsSourceStatus>('/api/status/news-sources'),
 }

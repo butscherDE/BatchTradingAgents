@@ -28,6 +28,14 @@ class WatchlistConfig(BaseSettings):
     exclude: list[str] = []
 
 
+class PollingConfig(BaseSettings):
+    yfinance_enabled: bool = True
+    yfinance_interval_minutes: int = 30
+    yfinance_articles_per_ticker: int = 10
+    yfinance_backoff_seconds: int = 60
+    yfinance_max_failures: int = 5
+
+
 class AccountConfig(BaseSettings):
     api_key: str = ""
     api_secret: str = ""
@@ -46,6 +54,7 @@ class ServiceConfig(BaseSettings):
     gpu: GpuConfig = Field(default_factory=GpuConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
+    polling: PollingConfig = Field(default_factory=PollingConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
     news_symbols: list[str] = Field(default_factory=lambda: ["*"])
 
@@ -68,6 +77,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     db_raw = raw.get("database", {})
     redis_raw = raw.get("redis", {})
     watchlist_raw = raw.get("watchlist", {})
+    polling_raw = raw.get("polling", {})
 
     accounts = {}
     for name, acct in accounts_raw.items():
@@ -94,6 +104,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             tickers=watchlist_raw.get("tickers", []),
             exclude=watchlist_raw.get("exclude", []),
         ),
+        polling=PollingConfig(**polling_raw),
         accounts=accounts,
         news_symbols=streams_raw.get("news_symbols", ["*"]),
     )

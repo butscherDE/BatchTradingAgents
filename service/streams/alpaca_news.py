@@ -17,11 +17,13 @@ class AlpacaNewsStream:
         api_secret: str,
         symbols: list[str],
         on_news: Callable[[dict], Awaitable[None]],
+        on_status: Callable[[str, str | None], None] | None = None,
     ):
         self._api_key = api_key
         self._api_secret = api_secret
         self._symbols = symbols
         self._on_news = on_news
+        self._on_status = on_status
         self._stream: NewsDataStream | None = None
         self._task: asyncio.Task | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -49,12 +51,16 @@ class AlpacaNewsStream:
 
         self._stream.subscribe_news(_news_handler, *self._symbols)
         self._task = asyncio.create_task(self._run_stream())
+        if self._on_status:
+            self._on_status("connected", None)
         logger.info(f"News stream started for symbols: {self._symbols}")
 
     async def _run_stream(self):
         try:
             await self._stream._run_forever()
-        except Exception:
+        except Exception as e:
+            if self._on_status:
+                self._on_status("disconnected", str(e))
             logger.exception("News stream connection error")
 
     async def stop(self):

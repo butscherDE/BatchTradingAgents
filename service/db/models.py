@@ -32,6 +32,7 @@ class NewsArticle(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     alpaca_id = Column(String, unique=True, nullable=True)
+    headline_hash = Column(String(64), unique=True, nullable=True, index=True)
     headline = Column(Text, nullable=False)
     summary = Column(Text, nullable=True)
     source = Column(String, nullable=True)
