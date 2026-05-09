@@ -474,6 +474,7 @@ async def _handle_screen_result(data: dict):
                 article.symbols[0] if article.symbols else None
             )
             if affected_ticker:
+                current_thesis = _get_current_thesis(affected_ticker)
                 task_id = await _scheduler.submit(TaskSpec(
                     model_tier="deep",
                     task_type="investigation",
@@ -483,6 +484,7 @@ async def _handle_screen_result(data: dict):
                         "summary": article.summary or "",
                         "symbols": article.symbols or [],
                         "ticker": affected_ticker,
+                        "current_thesis": current_thesis,
                     },
                     ticker=affected_ticker,
                 ))
@@ -992,6 +994,33 @@ async def _load_report_from_disk(ticker: str) -> dict | None:
         return json.loads(text)
     except Exception:
         return None
+
+
+def _get_current_thesis(ticker: str) -> str:
+    """Get the current investment thesis for a ticker (from memory or disk)."""
+    from pathlib import Path
+
+    # Try in-memory first (most recent)
+    report = _latest_reports.get(ticker)
+    if report:
+        state = report.get("final_state", {})
+        thesis = state.get("final_trade_decision", "")
+        if thesis:
+            return thesis[:1000]
+
+    # Fall back to disk
+    state_file = Path("reports") / "_states" / f"{ticker}.json"
+    if state_file.exists():
+        try:
+            import json
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            thesis = data.get("final_trade_decision", "")
+            if thesis:
+                return thesis[:1000]
+        except Exception:
+            pass
+
+    return ""
 
 
 def _extract_decision(final_trade_decision: str) -> str:

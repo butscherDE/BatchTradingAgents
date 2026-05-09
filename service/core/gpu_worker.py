@@ -213,6 +213,7 @@ class GpuWorker:
             summary=payload.get("summary", ""),
             symbols=payload.get("symbols", []),
             ticker=payload.get("ticker", ""),
+            current_thesis=payload.get("current_thesis", ""),
             ollama_url=self.config.gpu.ollama_url,
             model=self.config.gpu.deep_model,
         )

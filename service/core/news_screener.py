@@ -36,23 +36,38 @@ def investigate_deep(
     summary: str,
     symbols: list[str],
     ticker: str,
+    current_thesis: str,
     ollama_url: str,
     model: str,
 ) -> dict:
     """Deep investigation: does this news break the current thesis?"""
+    thesis_section = ""
+    if current_thesis:
+        thesis_section = f"""
+**Current Investment Thesis:**
+{current_thesis}
+
+"""
+    else:
+        thesis_section = """
+**Current Investment Thesis:** No prior analysis exists for this ticker.
+
+"""
+
     prompt = f"""You are a senior portfolio analyst performing a deep news investigation for ticker {ticker}.
 
 **News Headline:** {headline}
 **News Summary:** {summary or "(none available)"}
 **All Mentioned Symbols:** {", ".join(symbols)}
 **Focus Ticker:** {ticker}
+{thesis_section}Determine if this news represents:
+1. MATERIAL CHANGE — New information that CONTRADICTS or SIGNIFICANTLY ALTERS the current thesis. This must be something the thesis did not already account for.
+2. THESIS CONFIRMATION — News that is consistent with or already reflected in the existing thesis.
+3. NOISE — Not relevant to the investment thesis.
 
-Determine if this news represents:
-1. MATERIAL CHANGE — New information that could change the investment rating (earnings miss/beat, M&A, regulatory action, management change, fraud, guidance revision, major contract win/loss)
-2. THESIS CONFIRMATION — News that confirms the existing analysis (expected results, routine updates)
-3. NOISE — Not relevant to the investment thesis
+IMPORTANT: Only mark should_regenerate_report as true if the news introduces genuinely NEW information that the current thesis does not account for. If the thesis already reflects this news (e.g., it was written after this event), set should_regenerate_report to false.
 
-If MATERIAL CHANGE: recommend whether this likely moves the thesis toward BUY, HOLD, or SELL.
+If no current thesis exists, set should_regenerate_report to true for any material news.
 
 Respond in this exact JSON format:
 {{"verdict": "material_change|thesis_confirmation|noise", "direction": "buy|hold|sell|null", "reasoning": "<2-3 sentences explaining your assessment>", "should_regenerate_report": true|false}}"""
