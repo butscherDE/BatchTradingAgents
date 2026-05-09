@@ -11,7 +11,7 @@ export default function Tasks() {
   const [taskDetail, setTaskDetail] = useState<Record<string, unknown> | null>(null)
 
   const page = parseInt(searchParams.get('page') || '0')
-  const pageSize = parseInt(searchParams.get('size') || '50')
+  const pageSize = parseInt(searchParams.get('size') || '20')
   const statusFilter = searchParams.get('status') || ''
   const typeFilter = searchParams.get('type') || ''
   const tickerFilter = searchParams.get('ticker') || ''
