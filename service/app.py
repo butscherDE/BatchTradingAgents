@@ -561,34 +561,6 @@ async def _handle_investigation_result(data: dict):
             )
             await session.commit()
 
-    # If material change with sell direction → emergency sell for all accounts holding this ticker
-    if verdict == "material_change" and direction == "sell" and ticker:
-        for acct_name, acct in (_config.accounts.items() if _config else []):
-            sell_result = await asyncio.to_thread(
-                _execute_emergency_sell, acct, ticker, result.get("reasoning", "")
-            )
-            if sell_result and sell_result.get("qty_sold", 0) > 0:
-                async with get_db_session() as session:
-                    action = TradeAction(
-                        account_id=acct_name,
-                        ticker=ticker,
-                        action="sell_emergency",
-                        qty=sell_result["qty_sold"],
-                        trigger_reason=result.get("reasoning", ""),
-                        order_id=sell_result.get("order_id"),
-                        status=sell_result.get("status", "submitted"),
-                    )
-                    session.add(action)
-                    await session.commit()
-
-                await broadcast("trade_executed", {
-                    "account_id": acct_name,
-                    "ticker": ticker,
-                    "action": "sell_emergency",
-                    "qty": sell_result["qty_sold"],
-                    "reason": result.get("reasoning", ""),
-                })
-
     # If should regenerate → submit full analysis task
     if should_regenerate and ticker:
         new_task_id = await _scheduler.submit(TaskSpec(
