@@ -412,6 +412,8 @@ async def _listen_for_results():
                 await _handle_discovery_result(data)
             elif task_type == "watchlist_prune" and status == "completed":
                 await _handle_prune_result(data)
+            elif task_type == "news_consolidate" and status == "completed":
+                await _handle_consolidate_result(data)
 
             await broadcast("task_update", {
                 "task_id": task_id,
@@ -430,32 +432,40 @@ async def _handle_screen_result(data: dict):
 
     result = data.get("result", {})
     payload = data.get("payload", {})
-    article_id = payload.get("article_id") if payload else None
 
-    # Try to get article_id from the task's stored payload
-    if article_id is None:
-        async with get_db_session() as session:
-            from sqlalchemy import select
-            task_result = await session.execute(
-                select(GpuTask).where(GpuTask.task_id == data["task_id"])
-            )
-            task = task_result.scalar_one_or_none()
-            if task and task.payload:
-                article_id = task.payload.get("article_id")
+    # Support both single article_id and batch article_ids
+    article_ids = payload.get("article_ids") if payload else None
+    if not article_ids:
+        article_id = payload.get("article_id") if payload else None
+        # Fallback: look up from task's stored payload
+        if article_id is None:
+            async with get_db_session() as session:
+                from sqlalchemy import select
+                task_result = await session.execute(
+                    select(GpuTask).where(GpuTask.task_id == data["task_id"])
+                )
+                task = task_result.scalar_one_or_none()
+                if task and task.payload:
+                    article_ids = task.payload.get("article_ids")
+                    if not article_ids:
+                        article_id = task.payload.get("article_id")
+        if not article_ids:
+            article_ids = [article_id] if article_id else []
 
-    if article_id is None:
+    if not article_ids:
         return
 
+    primary_article_id = article_ids[0]
     score = result.get("score", 0.0)
     threshold = _config.evaluation.news_relevance_min_score if _config else 0.6
 
     if score >= threshold:
         new_status = InvestigationStatus.escalated
-        # Submit deep investigation
+        # Submit deep investigation using the primary article
         async with get_db_session() as session:
             from sqlalchemy import select
             art_result = await session.execute(
-                select(NewsArticle).where(NewsArticle.id == article_id)
+                select(NewsArticle).where(NewsArticle.id == primary_article_id)
             )
             article = art_result.scalar_one_or_none()
 
@@ -468,7 +478,7 @@ async def _handle_screen_result(data: dict):
                     model_tier="deep",
                     task_type="investigation",
                     payload={
-                        "article_id": article_id,
+                        "article_id": primary_article_id,
                         "headline": article.headline,
                         "summary": article.summary or "",
                         "symbols": article.symbols or [],
@@ -485,19 +495,19 @@ async def _handle_screen_result(data: dict):
                         ticker=affected_ticker,
                         priority=1,
                         status=TaskStatus.queued,
-                        payload={"article_id": article_id},
+                        payload={"article_id": primary_article_id},
                     )
                     session.add(db_task)
                     await session.commit()
     else:
         new_status = InvestigationStatus.quick_no_action
 
-    # Update article status
+    # Update ALL articles in the group to same status
     async with get_db_session() as session:
         from sqlalchemy import update
         await session.execute(
             update(NewsArticle)
-            .where(NewsArticle.id == article_id)
+            .where(NewsArticle.id.in_(article_ids))
             .values(
                 status=new_status,
                 quick_result=result,
@@ -506,11 +516,12 @@ async def _handle_screen_result(data: dict):
         )
         await session.commit()
 
-    await broadcast("news_status_changed", {
-        "id": article_id,
-        "status": new_status.value,
-        "score": score,
-    })
+    for aid in article_ids:
+        await broadcast("news_status_changed", {
+            "id": aid,
+            "status": new_status.value,
+            "score": score,
+        })
 
 
 async def _handle_investigation_result(data: dict):
@@ -1201,6 +1212,162 @@ def _fetch_yfinance_news(ticker: str, count: int = 10) -> list[dict]:
     return articles
 
 
+async def _insert_article_silent(article: dict) -> int | None:
+    """Insert article into DB without triggering tasks. Returns ID if new, None if duplicate."""
+    from service.core.headline_hash import compute_headline_hash
+    from service.api.ws import broadcast
+
+    symbols = article.get("symbols", [])
+    async with get_db_session() as session:
+        db_article = NewsArticle(
+            headline_hash=compute_headline_hash(article["headline"]),
+            headline=article["headline"],
+            summary=article.get("summary"),
+            source=article.get("source"),
+            symbols=symbols,
+            published_at=(
+                datetime.datetime.fromisoformat(article["published_at"])
+                if article.get("published_at") else None
+            ),
+            received_at=datetime.datetime.utcnow(),
+            status=InvestigationStatus.queued,
+        )
+        session.add(db_article)
+        try:
+            await session.commit()
+            await session.refresh(db_article)
+            await broadcast("news_added", {
+                "id": db_article.id,
+                "headline": article["headline"],
+                "symbols": symbols,
+            })
+            return db_article.id
+        except Exception:
+            await session.rollback()
+            return None
+
+
+async def _ingest_batch(ticker: str, new_articles: list[dict]):
+    """Ingest a batch of new articles for a ticker (BatchedSource path).
+    Single article → screen directly. Multiple → consolidate first.
+    """
+    if len(new_articles) == 0:
+        return
+    elif len(new_articles) == 1:
+        await _submit_news_screen(ticker, new_articles[0]["id"], new_articles[0])
+    else:
+        await _submit_consolidate_task(ticker, new_articles)
+
+
+async def _submit_news_screen(ticker: str, article_id: int, article: dict):
+    """Submit a single news_screen task for one article."""
+    task_id = await _scheduler.submit(TaskSpec(
+        model_tier="quick",
+        task_type="news_screen",
+        payload={
+            "article_id": article_id,
+            "headline": article["headline"],
+            "summary": article.get("summary", ""),
+            "symbols": article.get("symbols", [ticker]),
+        },
+        ticker=ticker,
+    ))
+    async with get_db_session() as session:
+        db_task = GpuTask(
+            task_id=task_id,
+            model_tier="quick",
+            task_type="news_screen",
+            ticker=ticker,
+            priority=1,
+            status=TaskStatus.queued,
+            payload={"article_id": article_id},
+        )
+        session.add(db_task)
+        await session.commit()
+
+
+async def _submit_consolidate_task(ticker: str, articles: list[dict]):
+    """Submit a single news_consolidate task for a batch of new articles."""
+    articles_payload = [
+        {"id": a["id"], "headline": a["headline"], "summary": a.get("summary", "")}
+        for a in articles
+    ]
+    task_id = await _scheduler.submit(TaskSpec(
+        model_tier="quick",
+        task_type="news_consolidate",
+        payload={
+            "ticker": ticker,
+            "articles": articles_payload,
+        },
+        ticker=ticker,
+    ))
+    async with get_db_session() as session:
+        db_task = GpuTask(
+            task_id=task_id,
+            model_tier="quick",
+            task_type="news_consolidate",
+            ticker=ticker,
+            priority=1,
+            status=TaskStatus.queued,
+            payload={"ticker": ticker, "articles": articles_payload},
+        )
+        session.add(db_task)
+        await session.commit()
+
+
+async def _handle_consolidate_result(data: dict):
+    """Process consolidated news — submit news_screen per distinct event."""
+    from sqlalchemy import select
+
+    result = data.get("result", {})
+    events = result.get("events", [])
+    ticker = data.get("ticker")
+
+    # Get the original articles list from the task's stored payload
+    async with get_db_session() as session:
+        task_result = await session.execute(
+            select(GpuTask).where(GpuTask.task_id == data["task_id"])
+        )
+        task = task_result.scalar_one_or_none()
+
+    task_payload = task.payload if task else {}
+    original_articles = task_payload.get("articles", []) if task_payload else []
+    all_article_ids = [a["id"] for a in original_articles]
+
+    if not events:
+        return
+
+    for event in events:
+        article_ids = event.get("article_ids", [])
+        if not article_ids and all_article_ids:
+            article_ids = all_article_ids
+
+        task_id = await _scheduler.submit(TaskSpec(
+            model_tier="quick",
+            task_type="news_screen",
+            payload={
+                "article_ids": article_ids,
+                "article_id": article_ids[0] if article_ids else None,
+                "headline": event.get("headline", ""),
+                "summary": event.get("summary", ""),
+                "symbols": [ticker] if ticker else [],
+            },
+            ticker=ticker,
+        ))
+        async with get_db_session() as session:
+            db_task = GpuTask(
+                task_id=task_id,
+                model_tier="quick",
+                task_type="news_screen",
+                ticker=ticker,
+                priority=1,
+                status=TaskStatus.queued,
+                payload={"article_ids": article_ids},
+            )
+            session.add(db_task)
+            await session.commit()
+
+
 async def _yfinance_poller():
     """Periodically fetch news from yfinance for all active watchlist tickers."""
     from service.db.models import WatchlistTicker
@@ -1243,9 +1410,14 @@ async def _yfinance_poller():
                     )
                     _news_source_health["yfinance"]["consecutive_failures"] = 0
 
+                    new_articles = []
                     for article_data in articles:
-                        await _handle_news_article(article_data)
-                        _news_source_health["yfinance"]["articles_found"] += 1
+                        article_id = await _insert_article_silent(article_data)
+                        if article_id is not None:
+                            new_articles.append({"id": article_id, **article_data})
+                            _news_source_health["yfinance"]["articles_found"] += 1
+
+                    await _ingest_batch(ticker, new_articles)
 
                 except asyncio.CancelledError:
                     raise

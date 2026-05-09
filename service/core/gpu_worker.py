@@ -172,6 +172,8 @@ class GpuWorker:
     def _dispatch(self, task_type: str, payload: dict) -> dict:
         if task_type == "news_screen":
             return self._screen_news(payload)
+        elif task_type == "news_consolidate":
+            return self._consolidate_news(payload)
         elif task_type == "investigation":
             return self._investigate(payload)
         elif task_type == "full_analysis":
@@ -191,6 +193,15 @@ class GpuWorker:
             headline=payload["headline"],
             summary=payload.get("summary", ""),
             symbols=payload.get("symbols", []),
+            ollama_url=self.config.gpu.ollama_url,
+            model=self.config.gpu.quick_model,
+        )
+
+    def _consolidate_news(self, payload: dict) -> dict:
+        from service.core.news_screener import consolidate_news
+        return consolidate_news(
+            ticker=payload.get("ticker", ""),
+            articles=payload.get("articles", []),
             ollama_url=self.config.gpu.ollama_url,
             model=self.config.gpu.quick_model,
         )

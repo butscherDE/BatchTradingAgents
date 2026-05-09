@@ -187,6 +187,7 @@ export default function Tasks() {
         <select value={typeFilter} onChange={e => setFilter('type', e.target.value)}>
           <option value="">All types</option>
           <option value="news_screen">news_screen</option>
+          <option value="news_consolidate">news_consolidate</option>
           <option value="investigation">investigation</option>
           <option value="full_analysis">full_analysis</option>
           <option value="merge_and_allocate">merge_and_allocate</option>

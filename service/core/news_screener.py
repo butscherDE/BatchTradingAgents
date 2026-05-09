@@ -61,6 +61,43 @@ Respond in this exact JSON format:
     return _parse_json_response(response, default_score=0.0)
 
 
+def consolidate_news(
+    ticker: str,
+    articles: list[dict],
+    ollama_url: str,
+    model: str,
+) -> dict:
+    """Consolidate multiple articles into distinct events, preserving all information."""
+    articles_text = "\n".join(
+        f"[{a['id']}] {a['headline']}"
+        + (f"\n    {a['summary'][:300]}" if a.get("summary") else "")
+        for a in articles
+    )
+
+    prompt = f"""You are a news consolidation assistant for ticker {ticker}.
+
+Below are {len(articles)} recent news articles that may cover overlapping events.
+Group them by distinct underlying event/story. Multiple articles covering the same
+event should be merged into ONE consolidated entry.
+
+IMPORTANT: When merging articles, preserve ALL unique facts, data points, price
+targets, analyst names, percentages, and details from every article in the group.
+The consolidated summary must be richer and more complete than any single article.
+Do not discard information.
+
+**Articles:**
+{articles_text}
+
+For each distinct event, produce a consolidated headline and a comprehensive summary
+that combines all key facts from the grouped articles.
+
+Respond in this exact JSON format:
+{{"events": [{{"headline": "...", "summary": "...", "article_ids": [1, 2, 3]}}]}}"""
+
+    response = _call_ollama(ollama_url, model, prompt)
+    return _parse_json_response(response, default_score=0.0)
+
+
 def _call_ollama(ollama_url: str, model: str, prompt: str) -> str:
     url = f"{ollama_url}/api/generate"
     payload = {
