@@ -324,17 +324,15 @@ async def _handle_price_bar(bar: dict):
 
 
 async def _listen_for_results():
-    """Subscribe to GPU worker results via Redis pub/sub."""
+    """Poll GPU worker results from Redis list (persistent, no messages lost)."""
     from service.api.ws import broadcast
 
-    pubsub = await _scheduler.subscribe_results()
-
     try:
-        async for message in pubsub.listen():
-            if message["type"] != "message":
+        while True:
+            data = await _scheduler.pop_result(timeout=1.0)
+            if data is None:
                 continue
 
-            data = json.loads(message["data"])
             task_id = data.get("task_id")
             task_type = data.get("task_type")
             status = data.get("status")
@@ -387,7 +385,7 @@ async def _listen_for_results():
             })
 
     except asyncio.CancelledError:
-        await pubsub.unsubscribe()
+        pass
 
 
 async def _handle_screen_result(data: dict):

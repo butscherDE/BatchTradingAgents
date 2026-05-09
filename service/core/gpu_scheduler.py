@@ -9,7 +9,7 @@ import redis.asyncio as aioredis
 
 QUICK_QUEUE = "gpu:queue:quick"
 DEEP_QUEUE = "gpu:queue:deep"
-RESULT_CHANNEL = "gpu:results"
+RESULT_QUEUE = "gpu:results:queue"
 STATUS_CHANNEL = "gpu:status"
 
 
@@ -88,16 +88,12 @@ class GpuScheduler:
         await self._redis.delete(QUICK_QUEUE)
         await self._redis.delete(DEEP_QUEUE)
 
-    async def publish_result(self, task_id: str, result: dict):
-        await self._redis.publish(RESULT_CHANNEL, json.dumps({
-            "task_id": task_id,
-            **result,
-        }))
-
-    async def subscribe_results(self):
-        pubsub = self._redis.pubsub()
-        await pubsub.subscribe(RESULT_CHANNEL)
-        return pubsub
+    async def pop_result(self, timeout: float = 1.0) -> dict | None:
+        """Pop a result from the results queue. Returns None if empty after timeout."""
+        result = await self._redis.blpop(RESULT_QUEUE, timeout=timeout)
+        if result:
+            return json.loads(result[1])
+        return None
 
     async def subscribe_status(self):
         pubsub = self._redis.pubsub()

@@ -14,7 +14,7 @@ from service.config import load_config, ServiceConfig
 
 QUICK_QUEUE = "gpu:queue:quick"
 DEEP_QUEUE = "gpu:queue:deep"
-RESULT_CHANNEL = "gpu:results"
+RESULT_QUEUE = "gpu:results:queue"
 STATUS_CHANNEL = "gpu:status"
 
 
@@ -106,7 +106,7 @@ class GpuWorker:
         started_at = datetime.datetime.utcnow().isoformat()
 
         # Publish "started" so the API shows task as running
-        self._redis.publish(RESULT_CHANNEL, json.dumps({
+        self._redis.rpush(RESULT_QUEUE, json.dumps({
             "task_id": task_id,
             "task_type": task_type,
             "ticker": ticker,
@@ -128,7 +128,7 @@ class GpuWorker:
                     if self._is_cancelled(task_id):
                         future.cancel()
                         executor.shutdown(wait=False)
-                        self._redis.publish(RESULT_CHANNEL, json.dumps({
+                        self._redis.rpush(RESULT_QUEUE, json.dumps({
                             "task_id": task_id,
                             "task_type": task_type,
                             "ticker": ticker,
@@ -139,7 +139,7 @@ class GpuWorker:
                         }))
                         return
 
-            self._redis.publish(RESULT_CHANNEL, json.dumps({
+            self._redis.rpush(RESULT_QUEUE, json.dumps({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
@@ -151,7 +151,7 @@ class GpuWorker:
         except Exception as e:
             import traceback
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
-            self._redis.publish(RESULT_CHANNEL, json.dumps({
+            self._redis.rpush(RESULT_QUEUE, json.dumps({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
