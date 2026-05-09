@@ -165,8 +165,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"News stream failed to start: {e}")
 
+    # Daily prune scheduler
+    prune_task = asyncio.create_task(_prune_scheduler())
+
     logger.info(f"Service started on {_config.host}:{_config.port}")
     yield
+
+    # Shutdown
+    prune_task.cancel()
 
     # Shutdown
     if result_task:
@@ -201,9 +207,15 @@ async def _handle_news_article(article: dict):
 
     on_watchlist = len(affected_accounts) > 0
 
-    # If not on watchlist and discovery is disabled, skip processing
-    if not on_watchlist and not (_config and _config.watchlist.dynamic_discovery):
-        return
+    # If not on watchlist, check if any account has dynamic_discovery enabled
+    discovery_accounts = []
+    if not on_watchlist and _config:
+        discovery_accounts = [
+            name for name, acct in _config.accounts.items()
+            if acct.dynamic_discovery
+        ]
+        if not discovery_accounts:
+            return  # No one cares about unwatched tickers
 
     # Determine task type based on watchlist membership
     task_type = "news_screen" if on_watchlist else "watchlist_discovery"
@@ -233,31 +245,60 @@ async def _handle_news_article(article: dict):
 
     ticker = symbols[0].upper() if symbols else None
 
-    # Submit task
-    task_id = await _scheduler.submit(TaskSpec(
-        model_tier="quick",
-        task_type=task_type,
-        payload={
-            "article_id": article_id,
-            "headline": article["headline"],
-            "summary": article.get("summary", ""),
-            "symbols": symbols,
-        },
-        ticker=ticker,
-    ))
-
-    async with get_db_session() as session:
-        db_task = GpuTask(
-            task_id=task_id,
+    if on_watchlist:
+        # Normal news screening for watched tickers
+        task_id = await _scheduler.submit(TaskSpec(
             model_tier="quick",
-            task_type=task_type,
+            task_type="news_screen",
+            payload={
+                "article_id": article_id,
+                "headline": article["headline"],
+                "summary": article.get("summary", ""),
+                "symbols": symbols,
+            },
             ticker=ticker,
-            priority=1,
-            status=TaskStatus.queued,
-            payload={"article_id": article_id},
-        )
-        session.add(db_task)
-        await session.commit()
+        ))
+        async with get_db_session() as session:
+            db_task = GpuTask(
+                task_id=task_id,
+                model_tier="quick",
+                task_type="news_screen",
+                ticker=ticker,
+                priority=1,
+                status=TaskStatus.queued,
+                payload={"article_id": article_id},
+            )
+            session.add(db_task)
+            await session.commit()
+    else:
+        # Discovery: submit per account with their strategy
+        for acct_name in discovery_accounts:
+            acct = _config.accounts[acct_name]
+            task_id = await _scheduler.submit(TaskSpec(
+                model_tier="quick",
+                task_type="watchlist_discovery",
+                payload={
+                    "article_id": article_id,
+                    "headline": article["headline"],
+                    "summary": article.get("summary", ""),
+                    "symbols": symbols,
+                    "account_id": acct_name,
+                    "strategy": acct.strategy,
+                },
+                ticker=ticker,
+            ))
+            async with get_db_session() as session:
+                db_task = GpuTask(
+                    task_id=task_id,
+                    model_tier="quick",
+                    task_type="watchlist_discovery",
+                    ticker=ticker,
+                    priority=1,
+                    status=TaskStatus.queued,
+                    payload={"article_id": article_id, "account_id": acct_name},
+                )
+                session.add(db_task)
+                await session.commit()
 
     await broadcast("news_added", {
         "id": article_id,
@@ -328,7 +369,8 @@ async def _listen_for_results():
                 await _handle_merge_result(data)
             elif task_type == "watchlist_discovery" and status == "completed":
                 await _handle_discovery_result(data)
-                await _handle_merge_result(data)
+            elif task_type == "watchlist_prune" and status == "completed":
+                await _handle_prune_result(data)
 
             await broadcast("task_update", {
                 "task_id": task_id,
@@ -617,48 +659,62 @@ async def _handle_merge_result(data: dict):
 
 
 async def _handle_discovery_result(data: dict):
-    """Process a watchlist discovery result — maybe add ticker to watchlist."""
+    """Process a watchlist discovery result — maybe add ticker to specific account."""
     from service.api.ws import broadcast
-    from service.db.models import WatchlistTicker
+    from service.db.models import WatchlistTicker, WatchlistEvent
 
     result = data.get("result", {})
     ticker = data.get("ticker")
     should_add = result.get("add", False)
     reasoning = result.get("reasoning", "")
 
-    if should_add and ticker:
-        async with get_db_session() as session:
-            from sqlalchemy import select
-            existing = await session.execute(
-                select(WatchlistTicker).where(WatchlistTicker.symbol == ticker.upper())
-            )
-            if not existing.scalar_one_or_none():
-                new_ticker = WatchlistTicker(
-                    symbol=ticker.upper(),
-                    added_by="auto_discovery",
-                    added_at=datetime.datetime.utcnow(),
-                    active=1,
-                )
-                session.add(new_ticker)
-                await session.commit()
-                logger.info(f"Auto-added {ticker} to watchlist: {reasoning}")
-
-                await broadcast("watchlist_changed", {
-                    "action": "added",
-                    "symbol": ticker.upper(),
-                    "reason": reasoning,
-                    "added_by": "auto_discovery",
-                })
-
-    # Update news article status
+    # Get account_id from the task payload
     task_id = data.get("task_id")
+    account_id = None
+    article_id = None
     async with get_db_session() as session:
         from sqlalchemy import select
         task_result = await session.execute(
             select(GpuTask).where(GpuTask.task_id == task_id)
         )
         task = task_result.scalar_one_or_none()
-        article_id = task.payload.get("article_id") if task and task.payload else None
+        if task and task.payload:
+            account_id = task.payload.get("account_id")
+            article_id = task.payload.get("article_id")
+
+    if should_add and ticker and account_id:
+        async with get_db_session() as session:
+            from sqlalchemy import select
+            existing = await session.execute(
+                select(WatchlistTicker).where(
+                    WatchlistTicker.account_id == account_id,
+                    WatchlistTicker.symbol == ticker.upper(),
+                )
+            )
+            if not existing.scalar_one_or_none():
+                session.add(WatchlistTicker(
+                    account_id=account_id,
+                    symbol=ticker.upper(),
+                    added_by="auto_discovery",
+                    added_at=datetime.datetime.utcnow(),
+                    active=1,
+                ))
+                session.add(WatchlistEvent(
+                    account_id=account_id,
+                    symbol=ticker.upper(),
+                    action="added",
+                    trigger="auto_discovery",
+                    reasoning=reasoning,
+                ))
+                await session.commit()
+                logger.info(f"Auto-added {ticker} to {account_id} watchlist: {reasoning}")
+
+                await broadcast("watchlist_changed", {
+                    "action": "added",
+                    "symbol": ticker.upper(),
+                    "account_id": account_id,
+                    "reason": reasoning,
+                })
 
     if article_id:
         new_status = InvestigationStatus.escalated if should_add else InvestigationStatus.quick_no_action
@@ -669,6 +725,120 @@ async def _handle_discovery_result(data: dict):
                 .where(NewsArticle.id == article_id)
                 .values(status=new_status, quick_result=result)
             )
+            await session.commit()
+
+
+async def _handle_prune_result(data: dict):
+    """Process a prune evaluation result."""
+    from service.api.ws import broadcast
+    from service.db.models import WatchlistTicker, WatchlistEvent
+    from sqlalchemy import select, update
+
+    result = data.get("result", {})
+    ticker = data.get("ticker")
+    task_id = data.get("task_id")
+
+    # Get account_id and stage from task payload
+    async with get_db_session() as session:
+        task_result = await session.execute(
+            select(GpuTask).where(GpuTask.task_id == task_id)
+        )
+        task = task_result.scalar_one_or_none()
+
+    if not task or not task.payload:
+        return
+
+    account_id = task.payload.get("account_id")
+    stage = task.payload.get("stage", "quick")
+    strategy = task.payload.get("strategy", "balanced")
+
+    if stage == "quick":
+        # Quick screening: if NOT "no" → escalate to deep
+        remove_answer = result.get("remove", "no").lower()
+        reasoning = result.get("reasoning", "")
+
+        if remove_answer == "no":
+            # Keep — log it
+            async with get_db_session() as session:
+                session.add(WatchlistEvent(
+                    account_id=account_id,
+                    symbol=ticker,
+                    action="prune_kept",
+                    trigger="auto_prune",
+                    reasoning=reasoning,
+                ))
+                await session.commit()
+        else:
+            # yes or maybe → submit deep confirmation
+            new_task_id = await _scheduler.submit(TaskSpec(
+                model_tier="deep",
+                task_type="watchlist_prune",
+                payload={
+                    "symbol": ticker,
+                    "account_id": account_id,
+                    "strategy": strategy,
+                    "stage": "deep",
+                    "quick_reasoning": reasoning,
+                    "recent_headlines": task.payload.get("recent_headlines", []),
+                },
+                ticker=ticker,
+                priority=2,
+            ))
+            async with get_db_session() as session:
+                db_task = GpuTask(
+                    task_id=new_task_id,
+                    model_tier="deep",
+                    task_type="watchlist_prune",
+                    ticker=ticker,
+                    priority=2,
+                    status=TaskStatus.queued,
+                    payload={"symbol": ticker, "account_id": account_id, "stage": "deep"},
+                )
+                session.add(db_task)
+                await session.commit()
+
+    elif stage == "deep":
+        # Deep confirmation
+        should_remove = result.get("remove", False)
+        reasoning = result.get("reasoning", "")
+
+        async with get_db_session() as session:
+            if should_remove:
+                # Remove from watchlist
+                await session.execute(
+                    update(WatchlistTicker)
+                    .where(
+                        WatchlistTicker.account_id == account_id,
+                        WatchlistTicker.symbol == ticker,
+                    )
+                    .values(
+                        active=0,
+                        removed_at=datetime.datetime.utcnow(),
+                        remove_reason=reasoning,
+                    )
+                )
+                session.add(WatchlistEvent(
+                    account_id=account_id,
+                    symbol=ticker,
+                    action="removed",
+                    trigger="auto_prune",
+                    reasoning=reasoning,
+                ))
+                logger.info(f"Auto-pruned {ticker} from {account_id}: {reasoning}")
+                await broadcast("watchlist_changed", {
+                    "action": "removed",
+                    "symbol": ticker,
+                    "account_id": account_id,
+                    "reason": reasoning,
+                })
+            else:
+                session.add(WatchlistEvent(
+                    account_id=account_id,
+                    symbol=ticker,
+                    action="prune_kept",
+                    trigger="auto_prune",
+                    reasoning=reasoning,
+                ))
             await session.commit()
 
 
@@ -776,6 +946,97 @@ async def _on_debounce_fire(account_id: str, tickers: list[str]):
         )
         session.add(db_task)
         await session.commit()
+
+
+async def _prune_scheduler():
+    """Run daily prune at 04:00 UTC for all accounts with auto_prune enabled."""
+    while True:
+        now = datetime.datetime.utcnow()
+        target = now.replace(hour=4, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += datetime.timedelta(days=1)
+        sleep_seconds = (target - now).total_seconds()
+        logger.info(f"Prune scheduler: next run in {sleep_seconds/3600:.1f}h at {target.isoformat()}")
+
+        await asyncio.sleep(sleep_seconds)
+
+        if not _config:
+            continue
+
+        for account_name, acct in _config.accounts.items():
+            if not acct.auto_prune:
+                continue
+
+            try:
+                await _run_prune_for_account(account_name, acct)
+            except Exception as e:
+                logger.error(f"Prune failed for {account_name}: {e}")
+
+
+async def _run_prune_for_account(account_name: str, acct):
+    """Submit prune tasks for all active tickers in an account (excluding held positions)."""
+    from service.db.models import WatchlistTicker
+    from sqlalchemy import select
+
+    # Get active tickers
+    async with get_db_session() as session:
+        result = await session.execute(
+            select(WatchlistTicker.symbol).where(
+                WatchlistTicker.account_id == account_name,
+                WatchlistTicker.active == 1,
+            )
+        )
+        tickers = list(result.scalars().all())
+
+    if not tickers:
+        return
+
+    # Exclude held positions
+    held_symbols = set()
+    try:
+        from alpaca.trading.client import TradingClient
+        client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
+        positions = client.get_all_positions()
+        held_symbols = {p.symbol for p in positions}
+
+        from alpaca.trading.requests import GetOrdersRequest
+        from alpaca.trading.enums import QueryOrderStatus
+        open_orders = client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))
+        held_symbols.update(o.symbol for o in open_orders)
+    except Exception:
+        pass
+
+    prunable = [t for t in tickers if t not in held_symbols]
+    if not prunable:
+        return
+
+    logger.info(f"Prune: evaluating {len(prunable)} tickers for {account_name} (skipping {len(held_symbols)} held)")
+
+    for symbol in prunable:
+        task_id = await _scheduler.submit(TaskSpec(
+            model_tier="quick",
+            task_type="watchlist_prune",
+            payload={
+                "symbol": symbol,
+                "account_id": account_name,
+                "strategy": acct.strategy,
+                "stage": "quick",
+                "recent_headlines": [],  # TODO: fetch recent headlines
+            },
+            ticker=symbol,
+        ))
+        async with get_db_session() as session:
+            db_task = GpuTask(
+                task_id=task_id,
+                model_tier="quick",
+                task_type="watchlist_prune",
+                ticker=symbol,
+                priority=2,  # low priority
+                status=TaskStatus.queued,
+                payload={"symbol": symbol, "account_id": account_name, "stage": "quick"},
+            )
+            session.add(db_task)
+            await session.commit()
 
 
 def create_app() -> FastAPI:

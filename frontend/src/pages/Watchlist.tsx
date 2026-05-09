@@ -16,11 +16,6 @@ interface WatchlistTicker {
   active: boolean
 }
 
-interface WatchlistConfig {
-  dynamic_discovery: boolean
-  auto_prune: boolean
-}
-
 export default function Watchlist() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null)
   const [showInactive, setShowInactive] = useState(false)
@@ -45,12 +40,21 @@ export default function Watchlist() {
 
   const { data: config } = useQuery({
     queryKey: ['watchlistConfig'],
-    queryFn: () => fetchJson<WatchlistConfig>('/api/watchlist/config'),
+    queryFn: () => fetchJson<Record<string, { dynamic_discovery: boolean; auto_prune: boolean; strategy: string }>>('/api/watchlist/config'),
+  })
+
+  const { data: events = [] } = useQuery({
+    queryKey: ['watchlistEvents', accountId],
+    queryFn: () => fetchJson<{ id: number; account_id: string; symbol: string; action: string; trigger: string; reasoning: string | null; created_at: string }[]>(
+      `/api/watchlist/events?account_id=${accountId}&limit=30`
+    ),
+    enabled: !!accountId,
   })
 
   useEffect(() => {
     if (lastMessage?.type === 'watchlist_changed') {
       queryClient.invalidateQueries({ queryKey: ['watchlist'] })
+      queryClient.invalidateQueries({ queryKey: ['watchlistEvents'] })
     }
   }, [lastMessage, queryClient])
 
@@ -137,13 +141,13 @@ export default function Watchlist() {
         <div className="stat-card">
           <h3>Dynamic Discovery</h3>
           <div className="value" style={{ fontSize: 16 }}>
-            {config?.dynamic_discovery ? '🟢 enabled' : '⚪ disabled'}
+            {config && accountId && config[accountId]?.dynamic_discovery ? '🟢 enabled' : '⚪ disabled'}
           </div>
         </div>
         <div className="stat-card">
           <h3>Auto Prune</h3>
           <div className="value" style={{ fontSize: 16 }}>
-            {config?.auto_prune ? '🟢 enabled' : '⚪ disabled'}
+            {config && accountId && config[accountId]?.auto_prune ? '🟢 enabled' : '⚪ disabled'}
           </div>
         </div>
       </div>
@@ -256,6 +260,32 @@ export default function Watchlist() {
             ))}
           </tbody>
         </table>
+      )}
+
+      {events.length > 0 && (
+        <details style={{ marginTop: 24 }} open>
+          <summary style={{ cursor: 'pointer', fontSize: 14, color: 'var(--accent)', marginBottom: 8 }}>
+            Activity Log ({events.length})
+          </summary>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {events.map(e => (
+              <div key={e.id} style={{ display: 'flex', alignItems: 'baseline', gap: 8, fontSize: 13 }}>
+                <span style={{ width: 20 }}>
+                  {e.action === 'added' ? '🟢' : e.action === 'removed' ? '🔴' : '⚪'}
+                </span>
+                <span style={{ fontWeight: 600, width: 60 }}>{e.symbol}</span>
+                <span style={{ color: 'var(--text-dim)', width: 100 }}>{e.action}</span>
+                <span className={`badge ${e.trigger === 'auto_discovery' ? 'badge-escalated' : e.trigger === 'auto_prune' ? 'badge-failed' : 'badge-completed'}`}>
+                  {e.trigger}
+                </span>
+                <span style={{ flex: 1, color: 'var(--text-dim)' }}>{e.reasoning || ''}</span>
+                <span style={{ fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>
+                  {new Date(e.created_at + 'Z').toLocaleString()}
+                </span>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   )

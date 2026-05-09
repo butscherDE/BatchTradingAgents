@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from service.db.models import WatchlistTicker
+from service.db.models import WatchlistTicker, WatchlistEvent
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
@@ -109,6 +109,12 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
         await session.commit()
         await session.refresh(ticker)
 
+    # Log event
+    session.add(WatchlistEvent(
+        account_id=account_id, symbol=symbol, action="added", trigger="manual",
+    ))
+    await session.commit()
+
     return WatchlistTickerResponse(
         id=ticker.id,
         account_id=ticker.account_id,
@@ -143,6 +149,9 @@ async def remove_ticker(
     ticker.active = 0
     ticker.removed_at = datetime.datetime.utcnow()
     ticker.remove_reason = reason
+    session.add(WatchlistEvent(
+        account_id=account_id, symbol=symbol, action="removed", trigger="manual", reasoning=reason,
+    ))
     await session.commit()
     return {"removed": symbol, "account_id": account_id, "reason": reason}
 
@@ -153,9 +162,49 @@ async def get_watchlist_config():
     if not _config:
         raise HTTPException(status_code=503, detail="Service not initialized")
     return {
-        "dynamic_discovery": _config.watchlist.dynamic_discovery,
-        "auto_prune": _config.watchlist.auto_prune,
+        name: {
+            "dynamic_discovery": acct.dynamic_discovery,
+            "auto_prune": acct.auto_prune,
+            "strategy": acct.strategy,
+        }
+        for name, acct in _config.accounts.items()
     }
+
+
+class WatchlistEventResponse(BaseModel):
+    id: int
+    account_id: str
+    symbol: str
+    action: str
+    trigger: str
+    reasoning: Optional[str] = None
+    created_at: datetime.datetime
+
+
+@router.get("/events", response_model=list[WatchlistEventResponse])
+async def list_events(
+    account_id: Optional[str] = Query(default=None),
+    limit: int = Query(default=50, le=200),
+    session: AsyncSession = Depends(get_session),
+):
+    query = select(WatchlistEvent).order_by(WatchlistEvent.created_at.desc())
+    if account_id:
+        query = query.where(WatchlistEvent.account_id == account_id)
+    query = query.limit(limit)
+    result = await session.execute(query)
+    events = result.scalars().all()
+    return [
+        WatchlistEventResponse(
+            id=e.id,
+            account_id=e.account_id,
+            symbol=e.symbol,
+            action=e.action,
+            trigger=e.trigger,
+            reasoning=e.reasoning,
+            created_at=e.created_at,
+        )
+        for e in events
+    ]
 
 
 @router.get("/search")

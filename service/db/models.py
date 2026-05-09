@@ -93,6 +93,18 @@ class WatchlistTicker(Base):
     active = Column(Integer, nullable=False, default=1)
 
 
+class WatchlistEvent(Base):
+    __tablename__ = "watchlist_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    account_id = Column(String, nullable=False, index=True)
+    symbol = Column(String, nullable=False)
+    action = Column(String, nullable=False)  # "added", "removed", "prune_kept"
+    trigger = Column(String, nullable=False)  # "manual", "auto_discovery", "auto_prune", "config"
+    reasoning = Column(Text, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+
+
 class ProposalStatus(str, enum.Enum):
     pending = "pending"
     approved = "approved"

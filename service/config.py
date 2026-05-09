@@ -31,6 +31,8 @@ class AccountConfig(BaseSettings):
     is_paper: bool = True
     strategy: str = "balanced"
     watchlist: str = "aggressive"
+    dynamic_discovery: bool = False
+    auto_prune: bool = False
 
 
 class ServiceConfig(BaseSettings):
@@ -72,6 +74,8 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             is_paper=acct.get("is_paper", True),
             strategy=acct.get("strategy", "balanced"),
             watchlist=acct.get("watchlist", "aggressive"),
+            dynamic_discovery=acct.get("dynamic_discovery", False),
+            auto_prune=acct.get("auto_prune", False),
         )
 
     return ServiceConfig(

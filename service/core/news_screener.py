@@ -90,27 +90,33 @@ def evaluate_watchlist_addition(
     headline: str,
     summary: str,
     symbol: str,
+    strategy: str,
+    strategy_instruction: str,
     ollama_url: str,
     model: str,
 ) -> dict:
-    """Quick model: should this unwatched ticker be added to the watchlist?"""
-    prompt = f"""You are a watchlist curator for an active trading portfolio. A news article just came in for a ticker that is NOT currently on our watchlist.
+    """Quick model: should this unwatched ticker be added to the watchlist? Strategy-aware."""
+    prompt = f"""You are a watchlist curator for a **{strategy}** trading portfolio.
+
+**Strategy description:** {strategy_instruction}
+
+A news article just came in for a ticker that is NOT currently on our watchlist.
 
 **Ticker:** {symbol}
 **Headline:** {headline}
 **Summary:** {summary or "(none)"}
 
-Should we ADD this ticker to our watchlist for further monitoring and potential investment?
+Should we ADD this ticker to our **{strategy}** watchlist for further monitoring and potential investment?
 
 Add to watchlist if:
-- The news suggests a significant catalyst (earnings beat, M&A, FDA approval, major contract)
-- The ticker is in a sector we care about with a clear trading opportunity
-- There's a time-sensitive opportunity that warrants further analysis
+- The news suggests a significant catalyst that fits the {strategy} risk profile
+- The ticker is in a sector aligned with this strategy
+- There's a time-sensitive opportunity warranting analysis
 
 Do NOT add if:
 - It's routine news (analyst price target changes, minor upgrades/downgrades)
-- The ticker is in a sector with no clear edge
-- The news is negative with no contrarian opportunity
+- The ticker doesn't fit the {strategy} approach (e.g., a speculative biotech for a conservative strategy)
+- The news is negative with no contrarian opportunity relevant to this strategy
 
 Respond in JSON:
 {{"add": true|false, "reasoning": "<one sentence>"}}"""
@@ -121,35 +127,75 @@ Respond in JSON:
 
 def evaluate_watchlist_prune(
     symbol: str,
+    strategy: str,
+    strategy_instruction: str,
     recent_headlines: list[str],
     ollama_url: str,
     model: str,
 ) -> dict:
-    """Deep model: should this ticker be removed from the watchlist?"""
+    """Quick model: should this ticker be removed from the watchlist? Strategy-aware."""
     headlines_str = "\n".join(f"  - {h}" for h in recent_headlines) if recent_headlines else "(no recent news)"
 
-    prompt = f"""You are a watchlist curator reviewing whether a ticker should be REMOVED from active monitoring.
+    prompt = f"""You are a watchlist curator reviewing whether a ticker still belongs on a **{strategy}** watchlist.
+
+**Strategy description:** {strategy_instruction}
 
 **Ticker:** {symbol}
 **Recent Headlines:**
 {headlines_str}
 
-Should we REMOVE this ticker from the watchlist?
+Should we REMOVE this ticker from the {strategy} watchlist?
 
 Remove if:
-- No meaningful catalysts in sight
-- The thesis has played out (position was exited or target hit)
-- The ticker is in a structural decline with no reversal catalyst
-- No news activity suggests the market has moved on
+- The ticker no longer fits the {strategy} risk profile
+- No meaningful catalysts in sight for this strategy
+- The thesis has played out or broken
+- The ticker is in a structural decline with no reversal catalyst relevant to this strategy
 
 Keep if:
 - There's an upcoming catalyst (earnings, FDA, conference)
-- Recent news shows the story is still developing
-- The ticker is volatile and could present an entry opportunity
-- We currently hold a position
+- Recent news shows the story is still developing and fits the strategy
+- The ticker could present an entry opportunity aligned with {strategy}
+
+Answer YES, MAYBE, or NO with one sentence of reasoning.
 
 Respond in JSON:
-{{"remove": true|false, "reasoning": "<one sentence>"}}"""
+{{"remove": "yes"|"maybe"|"no", "reasoning": "<one sentence>"}}"""
+
+    response = _call_ollama(ollama_url, model, prompt)
+    return _parse_json_response(response, default_score=0.0)
+
+
+def confirm_watchlist_prune(
+    symbol: str,
+    strategy: str,
+    strategy_instruction: str,
+    recent_headlines: list[str],
+    quick_reasoning: str,
+    ollama_url: str,
+    model: str,
+) -> dict:
+    """Deep model: confirm whether to prune a ticker (called when quick model didn't say 'no')."""
+    headlines_str = "\n".join(f"  - {h}" for h in recent_headlines) if recent_headlines else "(no recent news)"
+
+    prompt = f"""You are a senior portfolio strategist making the final decision on whether to remove a ticker from a **{strategy}** watchlist.
+
+**Strategy description:** {strategy_instruction}
+**Ticker:** {symbol}
+
+**Recent Headlines:**
+{headlines_str}
+
+**Initial screening said:** {quick_reasoning}
+
+Perform a thorough evaluation:
+1. Does this ticker still have a plausible investment thesis for a {strategy} approach?
+2. Are there any upcoming catalysts within the next 30 days?
+3. Is the sector/theme still relevant to this strategy?
+4. Could removing it cause us to miss an opportunity?
+
+Respond in JSON:
+{{"remove": true|false, "reasoning": "<2-3 sentences>"}}"""
 
     response = _call_ollama(ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)

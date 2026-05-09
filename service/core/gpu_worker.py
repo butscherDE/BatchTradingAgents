@@ -177,23 +177,47 @@ class GpuWorker:
 
     def _watchlist_discovery(self, payload: dict) -> dict:
         from service.core.news_screener import evaluate_watchlist_addition
+        from cli.position_risk import STRATEGY_THRESHOLDS
         symbol = payload.get("symbols", [""])[0] or payload.get("ticker", "")
+        strategy = payload.get("strategy", "balanced")
+        thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
         return evaluate_watchlist_addition(
             headline=payload["headline"],
             summary=payload.get("summary", ""),
             symbol=symbol,
+            strategy=strategy,
+            strategy_instruction=thresholds.get("instruction", ""),
             ollama_url=self.config.gpu.ollama_url,
             model=self.config.gpu.quick_model,
         )
 
     def _watchlist_prune(self, payload: dict) -> dict:
-        from service.core.news_screener import evaluate_watchlist_prune
-        return evaluate_watchlist_prune(
-            symbol=payload["symbol"],
-            recent_headlines=payload.get("recent_headlines", []),
-            ollama_url=self.config.gpu.ollama_url,
-            model=self.config.gpu.deep_model,
-        )
+        from cli.position_risk import STRATEGY_THRESHOLDS
+        strategy = payload.get("strategy", "balanced")
+        thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
+        stage = payload.get("stage", "quick")
+
+        if stage == "deep":
+            from service.core.news_screener import confirm_watchlist_prune
+            return confirm_watchlist_prune(
+                symbol=payload["symbol"],
+                strategy=strategy,
+                strategy_instruction=thresholds.get("instruction", ""),
+                recent_headlines=payload.get("recent_headlines", []),
+                quick_reasoning=payload.get("quick_reasoning", ""),
+                ollama_url=self.config.gpu.ollama_url,
+                model=self.config.gpu.deep_model,
+            )
+        else:
+            from service.core.news_screener import evaluate_watchlist_prune
+            return evaluate_watchlist_prune(
+                symbol=payload["symbol"],
+                strategy=strategy,
+                strategy_instruction=thresholds.get("instruction", ""),
+                recent_headlines=payload.get("recent_headlines", []),
+                ollama_url=self.config.gpu.ollama_url,
+                model=self.config.gpu.quick_model,
+            )
 
     def _full_analysis(self, payload: dict) -> dict:
         from shared.analysis import run_single_ticker
