@@ -179,15 +179,20 @@ export default function Tasks() {
             <tbody>
               {filtered.map((t: TaskItem) => {
                 let duration: string
+                let elapsed: number
                 if (t.started_at && t.completed_at) {
-                  duration = ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
+                  elapsed = Math.floor((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000)
                 } else if (t.started_at) {
-                  const elapsed = Math.floor((Date.now() - parseUtc(t.started_at).getTime()) / 1000)
-                  const mins = Math.floor(elapsed / 60)
-                  const secs = elapsed % 60
-                  duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+                  elapsed = Math.floor((Date.now() - parseUtc(t.started_at).getTime()) / 1000)
                 } else {
+                  elapsed = -1
+                }
+                if (elapsed < 0) {
                   duration = '—'
+                } else if (elapsed < 60) {
+                  duration = `${elapsed}s`
+                } else {
+                  duration = `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
                 }
                 return (
                   <tr key={t.id}>
