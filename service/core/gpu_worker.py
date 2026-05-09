@@ -395,6 +395,11 @@ class GpuWorker:
                 cash = portfolio_dict.get("cash", 0)
                 portfolio_value = sum(holdings.get(s, 0) * quotes.get(s, 0) for s in holdings) + cash
 
+                # Build order lookup from trade_plan (the actual computed trades)
+                order_map = {}
+                for o in trade_plan.orders:
+                    order_map[o.symbol] = o.side  # "buy" or "sell"
+
                 allocation_data = []
                 for a in allocation_plan.allocations:
                     current_qty = holdings.get(a.symbol, 0)
@@ -403,9 +408,16 @@ class GpuWorker:
                     current_pct = (current_value / portfolio_value * 100) if portfolio_value > 0 else 0
                     target_value = portfolio_value * a.pct / 100 if portfolio_value > 0 else 0
 
+                    # Action from computed orders, not LLM label
+                    action = order_map.get(a.symbol, "hold")
+
+                    # Skip tickers with 0 current and 0 target (no position, no allocation)
+                    if current_value < 1 and target_value < 1:
+                        continue
+
                     allocation_data.append({
                         "symbol": a.symbol,
-                        "action": a.action,
+                        "action": action,
                         "current_pct": round(current_pct, 2),
                         "target_pct": round(a.pct, 2),
                         "current_value": round(current_value, 2),
