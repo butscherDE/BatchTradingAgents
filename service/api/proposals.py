@@ -217,3 +217,95 @@ def _execute_orders(acct, orders: list[dict]) -> list[dict]:
             })
 
     return results
+
+
+@router.post("/trigger")
+async def trigger_merge_allocate(
+    account_id: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+):
+    """Manually trigger a merge+allocate for an account using latest reports on disk."""
+    from service.app import get_scheduler, _config, _load_report_from_disk, _extract_decision
+    from service.core.gpu_scheduler import TaskSpec
+    from service.db.models import GpuTask, TaskStatus, WatchlistTicker
+    from fastapi import HTTPException
+    from pathlib import Path
+    import json
+
+    if not _config:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+
+    acct = _config.accounts.get(account_id)
+    if not acct:
+        raise HTTPException(status_code=404, detail=f"Account '{account_id}' not found")
+
+    # Get active watchlist tickers for this account
+    result = await session.execute(
+        select(WatchlistTicker.symbol).where(
+            WatchlistTicker.account_id == account_id,
+            WatchlistTicker.active == 1,
+        )
+    )
+    symbols = list(result.scalars().all())
+
+    # Load latest states from disk
+    tickers_data = []
+    state_dir = Path("reports") / "_states"
+    for sym in symbols:
+        state_file = state_dir / f"{sym}.json"
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+                decision = _extract_decision(state.get("final_trade_decision", ""))
+                tickers_data.append({
+                    "ticker": sym,
+                    "decision": decision,
+                    "final_state": state,
+                })
+            except Exception:
+                pass
+
+    if not tickers_data:
+        raise HTTPException(status_code=400, detail="No reports available. Run full analysis first.")
+
+    # Fetch portfolio
+    portfolio = None
+    try:
+        from cli.alpaca_client import create_client, fetch_portfolio
+        client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+        port, _, _, _ = fetch_portfolio(client)
+        portfolio = {"holdings": port.holdings, "cash": port.cash}
+    except Exception:
+        pass
+
+    # Submit merge+allocate task
+    scheduler = get_scheduler()
+    task_id = await scheduler.submit(TaskSpec(
+        model_tier="deep",
+        task_type="merge_and_allocate",
+        payload={
+            "account_id": account_id,
+            "tickers_data": tickers_data,
+            "strategy": acct.strategy,
+            "portfolio": portfolio,
+        },
+    ))
+
+    db_task = GpuTask(
+        task_id=task_id,
+        model_tier="deep",
+        task_type="merge_and_allocate",
+        priority=1,
+        status=TaskStatus.queued,
+        payload={"account_id": account_id, "tickers": [t["ticker"] for t in tickers_data]},
+    )
+    session.add(db_task)
+    await session.commit()
+
+    return {
+        "submitted": True,
+        "task_id": task_id,
+        "account_id": account_id,
+        "tickers_count": len(tickers_data),
+        "tickers": [t["ticker"] for t in tickers_data],
+    }

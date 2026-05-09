@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { fetchJson } from '../api/client'
+import { fetchJson, AccountSummary, api } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { formatTime } from '../api/time'
 
@@ -93,9 +93,45 @@ export default function Proposals() {
   const pending = proposals.filter(p => p.status === 'pending')
   const history = proposals.filter(p => p.status !== 'pending')
 
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: api.getAccounts,
+  })
+
+  const triggerMutation = useMutation({
+    mutationFn: (accountId: string) =>
+      fetch(`/api/proposals/trigger?account_id=${accountId}`, { method: 'POST' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      alert(`Merge+Allocate submitted for ${data.tickers_count} tickers`)
+    },
+  })
+
   return (
     <div>
       <h1>Trade Proposals</h1>
+
+      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Trigger merge & allocation:</span>
+        {accounts.map((a: AccountSummary) => (
+          <button
+            key={a.id}
+            onClick={() => triggerMutation.mutate(a.id)}
+            disabled={triggerMutation.isPending}
+            style={{ fontSize: 12 }}
+          >
+            {a.name} ({a.strategy})
+          </button>
+        ))}
+      </div>
+      {triggerMutation.isError && (
+        <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>
+          {(triggerMutation.error as Error).message}
+        </p>
+      )}
 
       {pending.length > 0 && (
         <div style={{ marginBottom: 24 }}>
