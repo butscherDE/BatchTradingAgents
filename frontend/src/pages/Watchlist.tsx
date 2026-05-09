@@ -24,6 +24,7 @@ interface WatchlistConfig {
 export default function Watchlist() {
   const [selectedAccount, setSelectedAccount] = useState<string | null>(null)
   const [showInactive, setShowInactive] = useState(false)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const queryClient = useQueryClient()
   const { lastMessage } = useWebSocket()
 
@@ -73,16 +74,32 @@ export default function Watchlist() {
   })
 
   const analyzeMutation = useMutation({
-    mutationFn: (symbol?: string) =>
-      fetch(`/api/watchlist/analyze?account_id=${accountId}${symbol ? `&symbol=${symbol}` : ''}`, { method: 'POST' }).then(async r => {
+    mutationFn: (symbols?: string[]) => {
+      const params = new URLSearchParams({ account_id: accountId })
+      if (symbols && symbols.length === 1) params.set('symbol', symbols[0]!)
+      return fetch(`/api/watchlist/analyze?${params.toString()}`, { method: 'POST' }).then(async r => {
         if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
         return r.json()
-      }),
+      })
+    },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      setSelected(new Set())
       alert(`Submitted ${data.count} ticker(s) for full analysis`)
     },
   })
+
+  const analyzeSelected = () => {
+    if (selected.size === 0) return
+    const symbols = Array.from(selected)
+    Promise.all(symbols.map(s =>
+      fetch(`/api/watchlist/analyze?account_id=${accountId}&symbol=${s}`, { method: 'POST' })
+    )).then(() => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      setSelected(new Set())
+      alert(`Submitted ${symbols.length} ticker(s) for full analysis`)
+    })
+  }
 
   const activeCount = tickers.filter(t => t.active).length
 
@@ -141,9 +158,15 @@ export default function Watchlist() {
           Show removed
         </label>
         <button
+          onClick={() => analyzeSelected()}
+          disabled={selected.size === 0 || !accountId}
+          style={{ marginLeft: 'auto', opacity: selected.size === 0 ? 0.4 : 1 }}
+        >
+          Analyze Selected ({selected.size})
+        </button>
+        <button
           onClick={() => { if (confirm(`Run full analysis for all ${activeCount} tickers?`)) analyzeMutation.mutate() }}
           disabled={analyzeMutation.isPending || !accountId}
-          style={{ marginLeft: 'auto' }}
         >
           {analyzeMutation.isPending ? 'Submitting...' : `Analyze All (${activeCount})`}
         </button>
@@ -161,6 +184,19 @@ export default function Watchlist() {
         <table>
           <thead>
             <tr>
+              <th style={{ width: 30 }}>
+                <input
+                  type="checkbox"
+                  checked={selected.size > 0 && selected.size === tickers.filter(t => t.active).length}
+                  onChange={e => {
+                    if (e.target.checked) {
+                      setSelected(new Set(tickers.filter(t => t.active).map(t => t.symbol)))
+                    } else {
+                      setSelected(new Set())
+                    }
+                  }}
+                />
+              </th>
               <th>Symbol</th>
               <th>Added By</th>
               <th>Added</th>
@@ -171,6 +207,19 @@ export default function Watchlist() {
           <tbody>
             {tickers.map(t => (
               <tr key={t.id} style={{ opacity: t.active ? 1 : 0.5 }}>
+                <td>
+                  {t.active && (
+                    <input
+                      type="checkbox"
+                      checked={selected.has(t.symbol)}
+                      onChange={e => {
+                        const next = new Set(selected)
+                        if (e.target.checked) next.add(t.symbol); else next.delete(t.symbol)
+                        setSelected(next)
+                      }}
+                    />
+                  )}
+                </td>
                 <td style={{ fontWeight: 600 }}>{t.symbol}</td>
                 <td>
                   <span className={`badge ${t.added_by === 'auto_discovery' ? 'badge-escalated' : 'badge-completed'}`}>
@@ -189,7 +238,7 @@ export default function Watchlist() {
                   {t.active && (
                     <div style={{ display: 'flex', gap: 4 }}>
                       <button
-                        onClick={() => analyzeMutation.mutate(t.symbol)}
+                        onClick={() => analyzeMutation.mutate([t.symbol])}
                         style={{ fontSize: 11, padding: '3px 8px' }}
                       >
                         analyze
