@@ -25,6 +25,7 @@ _session_factory = None
 _start_time: float = 0
 _debouncer: MergeDebouncer | None = None
 _latest_reports: dict[str, dict] = {}  # ticker -> latest analysis result
+_orphaned_tasks: list = []  # tasks recovered from crash
 
 
 def get_scheduler() -> GpuScheduler:
@@ -70,6 +71,33 @@ async def _seed_watchlist(config_tickers: list[str]):
         await session.commit()
 
 
+async def _recover_orphaned_tasks():
+    """Re-queue tasks that were 'running' when the service last crashed."""
+    from sqlalchemy import select, update
+
+    async with get_db_session() as session:
+        result = await session.execute(
+            select(GpuTask).where(GpuTask.status == TaskStatus.running)
+        )
+        orphaned = result.scalars().all()
+
+        if not orphaned:
+            return
+
+        logger.info(f"Recovering {len(orphaned)} orphaned tasks from previous crash")
+
+        for task in orphaned:
+            # Reset to queued — the worker will re-process them
+            task.status = TaskStatus.queued
+            task.started_at = None
+
+        await session.commit()
+
+    # Re-submit to Redis queues (scheduler may not be connected yet, defer to after connect)
+    global _orphaned_tasks
+    _orphaned_tasks = orphaned
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _config, _scheduler, _session_factory, _start_time, _debouncer
@@ -92,10 +120,25 @@ async def lifespan(app: FastAPI):
     # Seed watchlist from config if DB is empty
     await _seed_watchlist(_config.watchlist.tickers)
 
+    # Recover orphaned tasks from previous crash
+    await _recover_orphaned_tasks()
+
     # Redis / GPU scheduler
     _scheduler = GpuScheduler(_config.redis_url)
     try:
         await _scheduler.connect()
+        # Re-queue orphaned tasks now that Redis is available
+        if _orphaned_tasks:
+            for task in _orphaned_tasks:
+                await _scheduler.submit(TaskSpec(
+                    model_tier=task.model_tier,
+                    task_type=task.task_type,
+                    payload=task.payload or {},
+                    ticker=task.ticker,
+                    priority=task.priority,
+                ))
+            logger.info(f"Re-submitted {len(_orphaned_tasks)} orphaned tasks to Redis")
+            _orphaned_tasks.clear()
     except Exception as e:
         logger.warning(f"Redis connection failed (tasks will not process): {e}")
 
