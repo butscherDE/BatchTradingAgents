@@ -55,6 +55,32 @@ async def list_tasks(
     ]
 
 
+@router.get("/stats", response_model=TaskStats)
+async def get_task_stats(session: AsyncSession = Depends(get_session)):
+    from service.app import get_scheduler
+
+    scheduler = get_scheduler()
+    depths = await scheduler.get_queue_depths()
+    worker_status = await scheduler.get_worker_status()
+
+    completed = await session.execute(
+        select(func.count()).where(GpuTask.status == TaskStatus.completed)
+    )
+    failed = await session.execute(
+        select(func.count()).where(GpuTask.status == TaskStatus.failed)
+    )
+
+    return TaskStats(
+        queue_depth_quick=depths.get("quick", 0),
+        queue_depth_deep=depths.get("deep", 0),
+        total_completed=completed.scalar() or 0,
+        total_failed=failed.scalar() or 0,
+        current_model=worker_status.get("current_model") if worker_status else None,
+        worker_state=worker_status.get("state") if worker_status else None,
+        model_switches=worker_status.get("model_switches", 0) if worker_status else 0,
+    )
+
+
 @router.get("/{task_id}")
 async def get_task_detail(task_id: str, session: AsyncSession = Depends(get_session)):
     """Get full task detail including result JSON."""
@@ -80,32 +106,6 @@ async def get_task_detail(task_id: str, session: AsyncSession = Depends(get_sess
         "started_at": task.started_at,
         "completed_at": task.completed_at,
     }
-
-
-@router.get("/stats", response_model=TaskStats)
-async def get_task_stats(session: AsyncSession = Depends(get_session)):
-    from service.app import get_scheduler
-
-    scheduler = get_scheduler()
-    depths = await scheduler.get_queue_depths()
-    worker_status = await scheduler.get_worker_status()
-
-    completed = await session.execute(
-        select(func.count()).where(GpuTask.status == TaskStatus.completed)
-    )
-    failed = await session.execute(
-        select(func.count()).where(GpuTask.status == TaskStatus.failed)
-    )
-
-    return TaskStats(
-        queue_depth_quick=depths.get("quick", 0),
-        queue_depth_deep=depths.get("deep", 0),
-        total_completed=completed.scalar() or 0,
-        total_failed=failed.scalar() or 0,
-        current_model=worker_status.get("current_model") if worker_status else None,
-        worker_state=worker_status.get("state") if worker_status else None,
-        model_switches=worker_status.get("model_switches", 0) if worker_status else 0,
-    )
 
 
 @router.post("/{task_id}/cancel")
