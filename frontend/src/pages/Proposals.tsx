@@ -121,38 +121,45 @@ export default function Proposals() {
     <div>
       <h1>Trade Proposals</h1>
 
-      <div style={{ marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 13, color: 'var(--text-dim)' }}>Trigger merge & allocation:</span>
-        {accounts.map((a: AccountSummary) => (
-          <button
-            key={a.id}
-            onClick={() => triggerMutation.mutate(a.id)}
-            disabled={triggerMutation.isPending}
-            style={{ fontSize: 12 }}
-          >
-            {a.name} ({a.strategy})
-          </button>
-        ))}
-        <span style={{ fontSize: 12, color: 'var(--text-dim)', marginLeft: 8 }}>Merge checks:</span>
-        <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 50, fontSize: 12 }}>
-          <option value={0}>0</option>
-          <option value={1}>1</option>
-          <option value={2}>2</option>
-          <option value={3}>3</option>
-        </select>
-        <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks:</span>
-        <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 50, fontSize: 12 }}>
-          <option value={0}>0</option>
-          <option value={1}>1</option>
-          <option value={2}>2</option>
-          <option value={3}>3</option>
-        </select>
+      <div className="stat-card" style={{ marginBottom: 24, padding: '16px 20px' }}>
+        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>New Merge & Allocation</h3>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Merge checks</span>
+            <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 45, fontSize: 12 }}>
+              <option value={0}>0</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks</span>
+            <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 45, fontSize: 12 }}>
+              <option value={0}>0</option>
+              <option value={1}>1</option>
+              <option value={2}>2</option>
+              <option value={3}>3</option>
+            </select>
+          </div>
+          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+            {accounts.map((a: AccountSummary) => (
+              <button
+                key={a.id}
+                onClick={() => triggerMutation.mutate(a.id)}
+                disabled={triggerMutation.isPending}
+              >
+                {triggerMutation.isPending ? '...' : `Run for ${a.name}`}
+              </button>
+            ))}
+          </div>
+        </div>
+        {triggerMutation.isError && (
+          <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>
+            {(triggerMutation.error as Error).message}
+          </p>
+        )}
       </div>
-      {triggerMutation.isError && (
-        <p style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12 }}>
-          {(triggerMutation.error as Error).message}
-        </p>
-      )}
 
       {pending.length > 0 && (
         <div style={{ marginBottom: 24 }}>
