@@ -1,4 +1,4 @@
-"""Watchlist management API endpoints."""
+"""Watchlist management API endpoints (per-account)."""
 
 import datetime
 from typing import Optional
@@ -21,6 +21,7 @@ async def get_session():
 
 class WatchlistTickerResponse(BaseModel):
     id: int
+    account_id: str
     symbol: str
     added_by: str
     added_at: datetime.datetime
@@ -30,20 +31,19 @@ class WatchlistTickerResponse(BaseModel):
 
 
 class AddTickerRequest(BaseModel):
+    account_id: str
     symbol: str
-
-
-class RemoveTickerRequest(BaseModel):
-    symbol: str
-    reason: str = "manual removal"
 
 
 @router.get("", response_model=list[WatchlistTickerResponse])
 async def list_watchlist(
+    account_id: Optional[str] = Query(default=None),
     active_only: bool = Query(default=True),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(WatchlistTicker).order_by(WatchlistTicker.symbol)
+    query = select(WatchlistTicker).order_by(WatchlistTicker.account_id, WatchlistTicker.symbol)
+    if account_id:
+        query = query.where(WatchlistTicker.account_id == account_id)
     if active_only:
         query = query.where(WatchlistTicker.active == 1)
     result = await session.execute(query)
@@ -51,6 +51,7 @@ async def list_watchlist(
     return [
         WatchlistTickerResponse(
             id=t.id,
+            account_id=t.account_id,
             symbol=t.symbol,
             added_by=t.added_by,
             added_at=t.added_at,
@@ -65,8 +66,11 @@ async def list_watchlist(
 @router.post("", response_model=WatchlistTickerResponse, status_code=201)
 async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get_session)):
     symbol = body.symbol.upper().strip()
+    account_id = body.account_id.strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol required")
+    if not account_id:
+        raise HTTPException(status_code=400, detail="account_id required")
 
     # Validate ticker exists
     import asyncio
@@ -75,12 +79,15 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
         raise HTTPException(status_code=400, detail=f"'{symbol}' is not a valid tradeable ticker")
 
     existing = await session.execute(
-        select(WatchlistTicker).where(WatchlistTicker.symbol == symbol)
+        select(WatchlistTicker).where(
+            WatchlistTicker.account_id == account_id,
+            WatchlistTicker.symbol == symbol,
+        )
     )
     ticker = existing.scalar_one_or_none()
 
     if ticker and ticker.active:
-        raise HTTPException(status_code=409, detail=f"{symbol} already on watchlist")
+        raise HTTPException(status_code=409, detail=f"{symbol} already on watchlist for {account_id}")
 
     if ticker and not ticker.active:
         ticker.active = 1
@@ -92,6 +99,7 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
         await session.refresh(ticker)
     else:
         ticker = WatchlistTicker(
+            account_id=account_id,
             symbol=symbol,
             added_by="manual",
             added_at=datetime.datetime.utcnow(),
@@ -103,6 +111,7 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
 
     return WatchlistTickerResponse(
         id=ticker.id,
+        account_id=ticker.account_id,
         symbol=ticker.symbol,
         added_by=ticker.added_by,
         added_at=ticker.added_at,
@@ -113,20 +122,29 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
 
 
 @router.delete("/{symbol}")
-async def remove_ticker(symbol: str, reason: str = "manual removal", session: AsyncSession = Depends(get_session)):
+async def remove_ticker(
+    symbol: str,
+    account_id: str = Query(...),
+    reason: str = Query(default="manual removal"),
+    session: AsyncSession = Depends(get_session),
+):
     symbol = symbol.upper().strip()
     result = await session.execute(
-        select(WatchlistTicker).where(WatchlistTicker.symbol == symbol, WatchlistTicker.active == 1)
+        select(WatchlistTicker).where(
+            WatchlistTicker.account_id == account_id,
+            WatchlistTicker.symbol == symbol,
+            WatchlistTicker.active == 1,
+        )
     )
     ticker = result.scalar_one_or_none()
     if not ticker:
-        raise HTTPException(status_code=404, detail=f"{symbol} not on active watchlist")
+        raise HTTPException(status_code=404, detail=f"{symbol} not on active watchlist for {account_id}")
 
     ticker.active = 0
     ticker.removed_at = datetime.datetime.utcnow()
     ticker.remove_reason = reason
     await session.commit()
-    return {"removed": symbol, "reason": reason}
+    return {"removed": symbol, "account_id": account_id, "reason": reason}
 
 
 @router.get("/config")
@@ -149,12 +167,9 @@ async def search_tickers(q: str = Query(min_length=1)):
 
 
 def _validate_ticker(symbol: str) -> bool:
-    """Check if a ticker is a valid tradeable asset on Alpaca."""
     from service.app import _config
-
     if not _config or not _config.accounts:
-        return True  # Can't validate without credentials, allow it
-
+        return True
     acct = next(iter(_config.accounts.values()))
     try:
         from alpaca.trading.client import TradingClient
@@ -176,7 +191,7 @@ def _search_tickers(query: str) -> list[dict]:
         search = yf.Search(query, max_results=8)
         for quote in getattr(search, "quotes", []):
             symbol = quote.get("symbol", "")
-            if not symbol or "." in symbol:  # skip foreign exchanges (e.g. AAPL.L)
+            if not symbol or "." in symbol:
                 continue
             results.append({
                 "symbol": symbol,
@@ -188,7 +203,6 @@ def _search_tickers(query: str) -> list[dict]:
     if not results:
         return []
 
-    # Enrich with live prices from Alpaca
     if _config and _config.accounts:
         acct = next(iter(_config.accounts.values()))
         try:
@@ -197,7 +211,6 @@ def _search_tickers(query: str) -> list[dict]:
 
             data_client = StockHistoricalDataClient(acct.api_key, acct.api_secret)
             symbols = [r["symbol"] for r in results]
-
             snapshots = data_client.get_stock_snapshot(
                 StockSnapshotRequest(symbol_or_symbols=symbols)
             )

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { fetchJson } from '../api/client'
+import { fetchJson, AccountSummary, api } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc } from '../api/time'
 import TickerSearch from '../components/TickerSearch'
 
 interface WatchlistTicker {
   id: number
+  account_id: string
   symbol: string
   added_by: string
   added_at: string
@@ -21,13 +22,24 @@ interface WatchlistConfig {
 }
 
 export default function Watchlist() {
+  const [selectedAccount, setSelectedAccount] = useState<string | null>(null)
   const [showInactive, setShowInactive] = useState(false)
   const queryClient = useQueryClient()
   const { lastMessage } = useWebSocket()
 
+  const { data: accounts = [] } = useQuery({
+    queryKey: ['accounts'],
+    queryFn: api.getAccounts,
+  })
+
+  const accountId = selectedAccount || accounts[0]?.id || ''
+
   const { data: tickers = [], isLoading } = useQuery({
-    queryKey: ['watchlist', showInactive],
-    queryFn: () => fetchJson<WatchlistTicker[]>(`/api/watchlist?active_only=${!showInactive}`),
+    queryKey: ['watchlist', accountId, showInactive],
+    queryFn: () => fetchJson<WatchlistTicker[]>(
+      `/api/watchlist?account_id=${accountId}&active_only=${!showInactive}`
+    ),
+    enabled: !!accountId,
   })
 
   const { data: config } = useQuery({
@@ -46,33 +58,52 @@ export default function Watchlist() {
       fetch('/api/watchlist', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ symbol }),
+        body: JSON.stringify({ account_id: accountId, symbol }),
       }).then(async r => { if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json() }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['watchlist'] })
-      setNewSymbol('')
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
   })
 
   const removeMutation = useMutation({
     mutationFn: (symbol: string) =>
-      fetch(`/api/watchlist/${symbol}`, { method: 'DELETE' }).then(r => {
-        if (!r.ok) throw new Error('Failed'); return r.json()
+      fetch(`/api/watchlist/${symbol}?account_id=${accountId}`, { method: 'DELETE' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
       }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
   })
 
-  const activeTickers = tickers.filter(t => t.active)
-  const inactiveTickers = tickers.filter(t => !t.active)
+  const activeCount = tickers.filter(t => t.active).length
 
   return (
     <div>
       <h1>Watchlist</h1>
 
-      <div className="stat-grid">
+      {accounts.length > 0 && (
+        <div className="stat-grid" style={{ marginBottom: 16 }}>
+          {accounts.map((a: AccountSummary) => (
+            <div
+              key={a.id}
+              className="stat-card"
+              style={{
+                cursor: 'pointer',
+                borderColor: accountId === a.id ? 'var(--accent)' : undefined,
+                borderWidth: accountId === a.id ? 2 : 1,
+              }}
+              onClick={() => setSelectedAccount(a.id)}
+            >
+              <h3>{a.name}</h3>
+              <div style={{ fontSize: 13, color: 'var(--text-dim)', marginTop: 4 }}>
+                Strategy: {a.strategy} · Watchlist: {a.watchlist}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="stat-grid" style={{ marginBottom: 16 }}>
         <div className="stat-card">
           <h3>Active Tickers</h3>
-          <div className="value">{activeTickers.length}</div>
+          <div className="value">{activeCount}</div>
         </div>
         <div className="stat-card">
           <h3>Dynamic Discovery</h3>
@@ -91,7 +122,7 @@ export default function Watchlist() {
       <div className="filters" style={{ marginBottom: 16 }}>
         <TickerSearch
           onSelect={(symbol) => addMutation.mutate(symbol)}
-          disabled={addMutation.isPending}
+          disabled={addMutation.isPending || !accountId}
         />
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginLeft: 16, fontSize: 13, color: 'var(--text-dim)' }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
@@ -105,7 +136,9 @@ export default function Watchlist() {
         </p>
       )}
 
-      {isLoading ? <p>Loading...</p> : (
+      {!accountId && <p style={{ color: 'var(--text-dim)' }}>No accounts configured</p>}
+
+      {accountId && isLoading ? <p>Loading...</p> : (
         <table>
           <thead>
             <tr>

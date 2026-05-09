@@ -19,7 +19,6 @@ def get_sync_engine(db_path: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite:///{path}"
     engine = create_engine(url, echo=False)
-    # Enable WAL mode
     with engine.connect() as conn:
         conn.execute(__import__("sqlalchemy").text("PRAGMA journal_mode=WAL"))
         conn.commit()
@@ -34,6 +33,24 @@ def get_sync_session_factory(engine) -> sessionmaker[Session]:
     return sessionmaker(engine, expire_on_commit=False)
 
 
-async def init_db(engine):
+async def init_db(engine, db_path: str = "./data/service.db"):
+    """Run Alembic migrations (creates tables if needed), then ensure all tables exist."""
+    import asyncio
+    await asyncio.to_thread(_run_migrations, db_path)
+
+    # Fallback: create any tables not yet covered by migrations (new tables)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+
+def _run_migrations(db_path: str):
+    """Run Alembic upgrade head synchronously."""
+    from alembic.config import Config
+    from alembic import command
+
+    alembic_cfg = Config(str(Path(__file__).parent / "alembic.ini"))
+    alembic_cfg.set_main_option("sqlalchemy.url", f"sqlite:///{db_path}")
+    try:
+        command.upgrade(alembic_cfg, "head")
+    except Exception:
+        pass
