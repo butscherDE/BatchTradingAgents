@@ -72,6 +72,18 @@ export default function Watchlist() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
   })
 
+  const analyzeMutation = useMutation({
+    mutationFn: (symbol?: string) =>
+      fetch(`/api/watchlist/analyze?account_id=${accountId}${symbol ? `&symbol=${symbol}` : ''}`, { method: 'POST' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      alert(`Submitted ${data.count} ticker(s) for full analysis`)
+    },
+  })
+
   const activeCount = tickers.filter(t => t.active).length
 
   return (
@@ -128,6 +140,13 @@ export default function Watchlist() {
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show removed
         </label>
+        <button
+          onClick={() => { if (confirm(`Run full analysis for all ${activeCount} tickers?`)) analyzeMutation.mutate() }}
+          disabled={analyzeMutation.isPending || !accountId}
+          style={{ marginLeft: 'auto' }}
+        >
+          {analyzeMutation.isPending ? 'Submitting...' : `Analyze All (${activeCount})`}
+        </button>
       </div>
 
       {addMutation.isError && (
@@ -168,12 +187,20 @@ export default function Watchlist() {
                 </td>
                 <td>
                   {t.active && (
-                    <button
-                      onClick={() => removeMutation.mutate(t.symbol)}
-                      style={{ background: 'var(--red)', fontSize: 11, padding: '3px 8px' }}
-                    >
-                      remove
-                    </button>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      <button
+                        onClick={() => analyzeMutation.mutate(t.symbol)}
+                        style={{ fontSize: 11, padding: '3px 8px' }}
+                      >
+                        analyze
+                      </button>
+                      <button
+                        onClick={() => removeMutation.mutate(t.symbol)}
+                        style={{ background: 'var(--red)', fontSize: 11, padding: '3px 8px' }}
+                      >
+                        remove
+                      </button>
+                    </div>
                   )}
                 </td>
               </tr>

@@ -166,6 +166,63 @@ async def search_tickers(q: str = Query(min_length=1)):
     return results
 
 
+@router.post("/analyze")
+async def trigger_analysis(
+    account_id: str = Query(...),
+    symbol: Optional[str] = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    """Trigger full analysis for a single ticker or all tickers in an account's watchlist."""
+    from service.app import get_scheduler, get_db_session
+    from service.core.gpu_scheduler import TaskSpec
+    from service.db.models import GpuTask, TaskStatus
+    import datetime
+
+    # Get tickers to analyze
+    if symbol:
+        symbols = [symbol.upper().strip()]
+    else:
+        result = await session.execute(
+            select(WatchlistTicker.symbol).where(
+                WatchlistTicker.account_id == account_id,
+                WatchlistTicker.active == 1,
+            )
+        )
+        symbols = list(result.scalars().all())
+
+    if not symbols:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="No tickers to analyze")
+
+    scheduler = get_scheduler()
+    submitted = []
+
+    for sym in symbols:
+        task_id = await scheduler.submit(TaskSpec(
+            model_tier="deep",
+            task_type="full_analysis",
+            payload={"ticker": sym, "account_id": account_id},
+            ticker=sym,
+            priority=1,
+        ))
+
+        db_task = GpuTask(
+            task_id=task_id,
+            model_tier="deep",
+            task_type="full_analysis",
+            ticker=sym,
+            priority=1,
+            status=TaskStatus.queued,
+            payload={"ticker": sym, "account_id": account_id},
+        )
+        session.add(db_task)
+        submitted.append(sym)
+
+    await session.commit()
+
+    return {"submitted": submitted, "count": len(submitted)}
+
+
 def _validate_ticker(symbol: str) -> bool:
     from service.app import _config
     if not _config or not _config.accounts:

@@ -59,4 +59,17 @@ ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradin
 
 # Restart service (stop + start)
 ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "taskkill /F /IM python.exe & cd C:\Users\danie\repos\BatchTradingAgents && start /B python -m service.main"
+
+# Backfill news from yfinance (pulls latest news for all watchlist tickers into DB)
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill"
+
+# Backfill with date filter (only news after a specific date)
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill --since 2026-05-07"
+
+# Replay articles through GPU pipeline (resubmits queued articles to GPU worker)
+# Requires service to be running
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools replay --since 2026-05-08T00:00:00"
+
+# Delete DB and start fresh (stop service first)
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && del data\service.db"
 ```
