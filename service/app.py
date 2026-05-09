@@ -41,33 +41,43 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 async def _seed_watchlist(config_tickers: list[str]):
-    """Seed watchlist from config tickers + watchlists.toml (only adds, never removes)."""
+    """Seed per-account watchlists from TOML on first run. Respects removals."""
     from service.db.models import WatchlistTicker
     from sqlalchemy import select
 
-    # Collect tickers from config
-    all_tickers = set(t.upper().strip() for t in config_tickers if t.strip())
-
-    # Also load from watchlists.toml if accounts reference a watchlist name
-    try:
-        from cli.watchlist import load_watchlist
-        for acct in (_config.accounts.values() if _config else []):
-            if acct.watchlist:
-                wl_tickers = load_watchlist(acct.watchlist)
-                all_tickers.update(t.upper() for t in wl_tickers)
-    except Exception:
-        pass
-
-    if not all_tickers:
+    if not _config:
         return
 
     async with get_db_session() as session:
-        for sym in sorted(all_tickers):
-            existing = await session.execute(
-                select(WatchlistTicker).where(WatchlistTicker.symbol == sym)
-            )
-            if not existing.scalar_one_or_none():
-                session.add(WatchlistTicker(symbol=sym, added_by="config", active=1))
+        for account_name, account_config in _config.accounts.items():
+            # Load tickers for this account's named watchlist
+            tickers = set()
+            try:
+                from cli.watchlist import load_watchlist
+                if account_config.watchlist:
+                    wl = load_watchlist(account_config.watchlist)
+                    tickers.update(t.upper() for t in wl)
+            except Exception:
+                pass
+
+            # Also add any explicit config tickers
+            tickers.update(t.upper().strip() for t in config_tickers if t.strip())
+
+            for sym in sorted(tickers):
+                existing = await session.execute(
+                    select(WatchlistTicker).where(
+                        WatchlistTicker.account_id == account_name,
+                        WatchlistTicker.symbol == sym,
+                    )
+                )
+                if existing.scalar_one_or_none() is None:
+                    session.add(WatchlistTicker(
+                        account_id=account_name,
+                        symbol=sym,
+                        added_by="config",
+                        active=1,
+                    ))
+
         await session.commit()
 
 
@@ -114,7 +124,7 @@ async def lifespan(app: FastAPI):
 
     # Database (always works — it's local SQLite)
     engine = get_async_engine(_config.database_path)
-    await init_db(engine)
+    await init_db(engine, _config.database_path)
     _session_factory = get_async_session_factory(engine)
 
     # Seed watchlist from config if DB is empty
@@ -127,6 +137,11 @@ async def lifespan(app: FastAPI):
     _scheduler = GpuScheduler(_config.redis_url)
     try:
         await _scheduler.connect()
+
+        # Start result listener FIRST — before resubmitting tasks,
+        # so we don't miss "running" events from the GPU worker
+        result_task = asyncio.create_task(_listen_for_results())
+
         # Re-queue orphaned tasks now that Redis is available
         if _orphaned_tasks:
             for task in _orphaned_tasks:
@@ -141,6 +156,7 @@ async def lifespan(app: FastAPI):
             _orphaned_tasks.clear()
     except Exception as e:
         logger.warning(f"Redis connection failed (tasks will not process): {e}")
+        result_task = None
 
     # News stream (single connection — Alpaca connection limit)
     stream_manager = StreamManager(_config, on_news=_handle_news_article)
@@ -148,13 +164,6 @@ async def lifespan(app: FastAPI):
         await stream_manager.start()
     except Exception as e:
         logger.warning(f"News stream failed to start: {e}")
-
-    # Result listener
-    result_task = None
-    try:
-        result_task = asyncio.create_task(_listen_for_results())
-    except Exception as e:
-        logger.warning(f"Result listener failed to start: {e}")
 
     logger.info(f"Service started on {_config.host}:{_config.port}")
     yield
@@ -178,18 +187,19 @@ async def _handle_news_article(article: dict):
 
     symbols = article.get("symbols", [])
 
-    # Check if any symbol is on the active watchlist
-    on_watchlist = False
+    # Check which accounts actively watch any of the article's symbols
+    affected_accounts = []
     if symbols:
         async with get_db_session() as session:
             result = await session.execute(
-                select(WatchlistTicker.symbol).where(
+                select(WatchlistTicker.account_id).distinct().where(
                     WatchlistTicker.symbol.in_([s.upper() for s in symbols]),
                     WatchlistTicker.active == 1,
                 )
             )
-            watched = set(result.scalars().all())
-            on_watchlist = len(watched) > 0
+            affected_accounts = list(result.scalars().all())
+
+    on_watchlist = len(affected_accounts) > 0
 
     # If not on watchlist and discovery is disabled, skip processing
     if not on_watchlist and not (_config and _config.watchlist.dynamic_discovery):
