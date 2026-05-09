@@ -162,11 +162,17 @@ export default function Tasks() {
             </thead>
             <tbody>
               {filtered.map((t: TaskItem) => {
-                const duration = t.started_at && t.completed_at
-                  ? ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
-                  : t.started_at
-                    ? 'running...'
-                    : '—'
+                let duration: string
+                if (t.started_at && t.completed_at) {
+                  duration = ((parseUtc(t.completed_at).getTime() - parseUtc(t.started_at).getTime()) / 1000).toFixed(1) + 's'
+                } else if (t.started_at) {
+                  const elapsed = Math.floor((Date.now() - parseUtc(t.started_at).getTime()) / 1000)
+                  const mins = Math.floor(elapsed / 60)
+                  const secs = elapsed % 60
+                  duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`
+                } else {
+                  duration = '—'
+                }
                 return (
                   <tr key={t.id}>
                     <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
