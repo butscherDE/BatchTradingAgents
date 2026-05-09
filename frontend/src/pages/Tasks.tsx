@@ -7,6 +7,8 @@ import { parseUtc, formatTime } from '../api/time'
 
 export default function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const [expandedTask, setExpandedTask] = useState<string | null>(null)
+  const [taskDetail, setTaskDetail] = useState<Record<string, unknown> | null>(null)
 
   const page = parseInt(searchParams.get('page') || '0')
   const pageSize = parseInt(searchParams.get('size') || '50')
@@ -195,7 +197,19 @@ export default function Tasks() {
                   duration = `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`
                 }
                 return (
-                  <tr key={t.id}>
+                  <>
+                  <tr key={t.id} onClick={async () => {
+                    if (expandedTask === t.task_id) {
+                      setExpandedTask(null)
+                      setTaskDetail(null)
+                    } else {
+                      setExpandedTask(t.task_id)
+                      try {
+                        const detail = await fetchJson<Record<string, unknown>>(`/api/tasks/${t.task_id}`)
+                        setTaskDetail(detail)
+                      } catch { setTaskDetail(null) }
+                    }
+                  }} style={{ cursor: 'pointer' }}>
                     <td style={{ whiteSpace: 'nowrap', fontSize: '12px' }}>
                       {formatTime(t.created_at)}
                     </td>
@@ -210,7 +224,7 @@ export default function Tasks() {
                     <td>
                       {(t.status === 'queued' || t.status === 'running') && (
                         <button
-                          onClick={() => cancelMutation.mutate(t.task_id)}
+                          onClick={(e) => { e.stopPropagation(); cancelMutation.mutate(t.task_id) }}
                           style={{ background: 'var(--red)', fontSize: 11, padding: '2px 6px' }}
                         >
                           cancel
@@ -218,6 +232,37 @@ export default function Tasks() {
                       )}
                     </td>
                   </tr>
+                  {expandedTask === t.task_id && taskDetail && (
+                    <tr>
+                      <td colSpan={8} style={{ padding: '12px 16px', background: 'var(--surface)' }}>
+                        <div style={{ fontSize: 12 }}>
+                          {taskDetail.result && (
+                            <div style={{ marginBottom: 8 }}>
+                              <strong style={{ color: 'var(--accent)' }}>Result:</strong>
+                              <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--text)', maxHeight: 300, overflow: 'auto' }}>
+                                {JSON.stringify(taskDetail.result, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {taskDetail.error && (
+                            <div style={{ marginBottom: 8 }}>
+                              <strong style={{ color: 'var(--red)' }}>Error:</strong>
+                              <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--red)' }}>{taskDetail.error as string}</pre>
+                            </div>
+                          )}
+                          {taskDetail.payload && (
+                            <div>
+                              <strong style={{ color: 'var(--text-dim)' }}>Payload:</strong>
+                              <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--text-dim)', maxHeight: 200, overflow: 'auto' }}>
+                                {JSON.stringify(taskDetail.payload, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 )
               })}
             </tbody>

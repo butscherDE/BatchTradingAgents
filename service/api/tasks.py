@@ -55,6 +55,33 @@ async def list_tasks(
     ]
 
 
+@router.get("/{task_id}")
+async def get_task_detail(task_id: str, session: AsyncSession = Depends(get_session)):
+    """Get full task detail including result JSON."""
+    from fastapi import HTTPException
+    result = await session.execute(
+        select(GpuTask).where(GpuTask.task_id == task_id)
+    )
+    task = result.scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {
+        "id": task.id,
+        "task_id": task.task_id,
+        "model_tier": task.model_tier,
+        "task_type": task.task_type,
+        "ticker": task.ticker,
+        "priority": task.priority,
+        "status": task.status.value if hasattr(task.status, "value") else task.status,
+        "payload": task.payload,
+        "result": task.result,
+        "error": task.error,
+        "created_at": task.created_at,
+        "started_at": task.started_at,
+        "completed_at": task.completed_at,
+    }
+
+
 @router.get("/stats", response_model=TaskStats)
 async def get_task_stats(session: AsyncSession = Depends(get_session)):
     from service.app import get_scheduler
