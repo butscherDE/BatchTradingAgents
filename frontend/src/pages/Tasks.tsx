@@ -1,16 +1,32 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
 import { api, TaskItem, TaskStats, fetchJson } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc, formatTime } from '../api/time'
 
 export default function Tasks() {
-  const [page, setPage] = useState(0)
-  const [pageSize, setPageSize] = useState(50)
-  const [statusFilter, setStatusFilter] = useState('')
-  const [typeFilter, setTypeFilter] = useState('')
-  const [tickerFilter, setTickerFilter] = useState('')
-  const [modelFilter, setModelFilter] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const page = parseInt(searchParams.get('page') || '0')
+  const pageSize = parseInt(searchParams.get('size') || '50')
+  const statusFilter = searchParams.get('status') || ''
+  const typeFilter = searchParams.get('type') || ''
+  const tickerFilter = searchParams.get('ticker') || ''
+  const modelFilter = searchParams.get('model') || ''
+
+  const setFilter = (key: string, value: string) => {
+    const params = new URLSearchParams(searchParams)
+    if (value) params.set(key, value); else params.delete(key)
+    if (key !== 'page') params.delete('page')
+    setSearchParams(params, { replace: true })
+  }
+  const setPage = (p: number | ((prev: number) => number)) => {
+    const params = new URLSearchParams(searchParams)
+    const newPage = typeof p === 'function' ? p(page) : p
+    if (newPage > 0) params.set('page', String(newPage)); else params.delete('page')
+    setSearchParams(params, { replace: true })
+  }
 
   const queryClient = useQueryClient()
   const { lastMessage, connected } = useWebSocket()
@@ -109,7 +125,7 @@ export default function Tasks() {
       </div>
 
       <div className="filters">
-        <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(0) }}>
+        <select value={statusFilter} onChange={e => setFilter('status', e.target.value)}>
           <option value="">All statuses</option>
           <option value="queued">Queued</option>
           <option value="running">Running</option>
@@ -117,7 +133,7 @@ export default function Tasks() {
           <option value="failed">Failed</option>
           <option value="cancelled">Cancelled</option>
         </select>
-        <select value={typeFilter} onChange={e => { setTypeFilter(e.target.value); setPage(0) }}>
+        <select value={typeFilter} onChange={e => setFilter('type', e.target.value)}>
           <option value="">All types</option>
           <option value="news_screen">news_screen</option>
           <option value="investigation">investigation</option>
@@ -125,7 +141,7 @@ export default function Tasks() {
           <option value="merge_and_allocate">merge_and_allocate</option>
           <option value="watchlist_discovery">watchlist_discovery</option>
         </select>
-        <select value={modelFilter} onChange={e => { setModelFilter(e.target.value); setPage(0) }}>
+        <select value={modelFilter} onChange={e => setFilter('model', e.target.value)}>
           <option value="">All models</option>
           <option value="quick">quick</option>
           <option value="deep">deep</option>
@@ -133,7 +149,7 @@ export default function Tasks() {
         <input
           placeholder="Filter ticker..."
           value={tickerFilter}
-          onChange={e => { setTickerFilter(e.target.value); setPage(0) }}
+          onChange={e => setFilter('ticker', e.target.value)}
           style={{ width: 100 }}
         />
         <button
@@ -209,7 +225,7 @@ export default function Tasks() {
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <select
                 value={pageSize}
-                onChange={e => { setPageSize(Number(e.target.value)); setPage(0) }}
+                onChange={e => setFilter('size', e.target.value === '50' ? '' : e.target.value)}
                 style={{ fontSize: 13 }}
               >
                 <option value={10}>10 / page</option>
