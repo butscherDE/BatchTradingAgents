@@ -15,15 +15,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("watchlist_tickers", recreate="always") as batch_op:
-        batch_op.add_column(sa.Column("account_id", sa.String(), nullable=False, server_default="paper_main"))
-        batch_op.create_unique_constraint("uq_watchlist_account_symbol", ["account_id", "symbol"])
-        batch_op.create_index("ix_watchlist_tickers_account_id", ["account_id"])
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+
+    # If table doesn't exist, skip — create_all will handle it
+    if "watchlist_tickers" not in inspector.get_table_names():
+        return
+
+    # If account_id already exists, skip
+    columns = [c["name"] for c in inspector.get_columns("watchlist_tickers")]
+    if "account_id" in columns:
+        return
+
+    # Add column with ALTER TABLE (simpler, avoids batch recreate issues)
+    op.add_column("watchlist_tickers", sa.Column("account_id", sa.String(), nullable=False, server_default="paper_main"))
 
 
 def downgrade() -> None:
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    if "watchlist_tickers" not in inspector.get_table_names():
+        return
+    columns = [c["name"] for c in inspector.get_columns("watchlist_tickers")]
+    if "account_id" not in columns:
+        return
     with op.batch_alter_table("watchlist_tickers") as batch_op:
-        batch_op.drop_index("ix_watchlist_tickers_account_id")
-        batch_op.drop_constraint("uq_watchlist_account_symbol", type_="unique")
-        batch_op.create_unique_constraint("uq_watchlist_tickers_symbol", ["symbol"])
         batch_op.drop_column("account_id")
