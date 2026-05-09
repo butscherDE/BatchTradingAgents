@@ -2,7 +2,6 @@
 
 import logging
 import multiprocessing
-import signal
 import sys
 from pathlib import Path
 
@@ -38,15 +37,15 @@ def main():
     worker_process.start()
     logger.info(f"GPU worker started (PID {worker_process.pid})")
 
-    def _shutdown(signum, frame):
-        logger.info("Shutdown signal received (Ctrl+C). Stopping...")
+    import atexit
+
+    def _shutdown():
+        logger.info("Shutdown signal received. Stopping GPU worker...")
         worker_process.terminate()
         worker_process.join(timeout=5)
-        sys.exit(0)
+        logger.info("Shutdown complete.")
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    atexit.register(_shutdown)
 
     # Start FastAPI
     uvicorn.run(
