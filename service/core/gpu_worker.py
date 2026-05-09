@@ -245,19 +245,21 @@ class GpuWorker:
 
         final_state = result["final_state"]
 
-        # Save report to disk
-        reports_dir = Path("reports") / ticker
+        # Save report to disk with date suffix (same format as CLI)
+        analysis_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        reports_dir = Path("reports") / f"{ticker}_{analysis_date}"
         try:
             from cli.main import save_report_to_disk
             save_report_to_disk(final_state, ticker, reports_dir)
         except Exception:
             pass
 
-        # Also save the full state as JSON for the merge step
+        # Save the full state as JSON for the merge step (always latest per ticker)
         state_dir = Path("reports") / "_states"
         state_dir.mkdir(parents=True, exist_ok=True)
         state_file = state_dir / f"{ticker}.json"
         serializable_state = {
+            "generated_at": datetime.datetime.utcnow().isoformat(),
             "final_trade_decision": final_state.get("final_trade_decision", ""),
             "market_report": final_state.get("market_report", ""),
             "news_report": final_state.get("news_report", ""),
