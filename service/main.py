@@ -39,12 +39,13 @@ def main():
     logger.info(f"GPU worker started (PID {worker_process.pid})")
 
     def _shutdown(signum, frame):
-        logger.info("Shutting down...")
+        logger.info("Shutdown signal received (Ctrl+C). Stopping...")
         worker_process.terminate()
-        worker_process.join(timeout=10)
+        worker_process.join(timeout=5)
         sys.exit(0)
 
     signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGINT, _shutdown)
 
     # Start FastAPI
