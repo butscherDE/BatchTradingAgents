@@ -685,6 +685,38 @@ def _execute_emergency_sell(acct, ticker: str, reason: str) -> dict | None:
     )
 
 
+async def _load_report_from_disk(ticker: str) -> dict | None:
+    """Load a saved analysis state from reports/_states/{ticker}.json."""
+    import asyncio
+    from pathlib import Path
+    import json
+
+    state_file = Path("reports") / "_states" / f"{ticker}.json"
+    if not state_file.exists():
+        return None
+    try:
+        text = await asyncio.to_thread(state_file.read_text, "utf-8")
+        return json.loads(text)
+    except Exception:
+        return None
+
+
+def _extract_decision(final_trade_decision: str) -> str:
+    """Extract a Buy/Sell/Hold decision from the PM text."""
+    text = final_trade_decision.lower()
+    if "strong buy" in text or "rating: buy" in text:
+        return "Buy"
+    elif "sell" in text or "exit" in text:
+        return "Sell"
+    elif "overweight" in text:
+        return "Overweight"
+    elif "underweight" in text:
+        return "Underweight"
+    elif "hold" in text:
+        return "Hold"
+    return "Hold"
+
+
 async def _on_debounce_fire(account_id: str, tickers: list[str]):
     """Called when the merge debounce timer fires for an account."""
     tickers_data = []
@@ -696,6 +728,17 @@ async def _on_debounce_fire(account_id: str, tickers: list[str]):
                 "decision": report.get("decision", ""),
                 "final_state": report.get("final_state", {}),
             })
+        else:
+            # Fallback: load from disk
+            state = await _load_report_from_disk(ticker)
+            if state:
+                from tradingagents.graph.signal_processing import process_signal_stub
+                decision = _extract_decision(state.get("final_trade_decision", ""))
+                tickers_data.append({
+                    "ticker": ticker,
+                    "decision": decision,
+                    "final_state": state,
+                })
 
     if not tickers_data:
         return

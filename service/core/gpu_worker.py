@@ -198,6 +198,8 @@ class GpuWorker:
     def _full_analysis(self, payload: dict) -> dict:
         from shared.analysis import run_single_ticker
         from shared.config import build_graph_config
+        from pathlib import Path
+        import json
 
         ticker = payload["ticker"]
         ollama_base = self.config.gpu.ollama_url.rstrip("/")
@@ -217,16 +219,36 @@ class GpuWorker:
             past_context=payload.get("past_context", ""),
         )
 
+        final_state = result["final_state"]
+
+        # Save report to disk
+        reports_dir = Path("reports") / ticker
+        try:
+            from cli.main import save_report_to_disk
+            save_report_to_disk(final_state, ticker, reports_dir)
+        except Exception:
+            pass
+
+        # Also save the full state as JSON for the merge step
+        state_dir = Path("reports") / "_states"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state_file = state_dir / f"{ticker}.json"
+        serializable_state = {
+            "final_trade_decision": final_state.get("final_trade_decision", ""),
+            "market_report": final_state.get("market_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "investment_debate_state": final_state.get("investment_debate_state", {}),
+            "trader_investment_plan": final_state.get("trader_investment_plan", ""),
+            "risk_debate_state": final_state.get("risk_debate_state", {}),
+        }
+        state_file.write_text(json.dumps(serializable_state, indent=2, default=str), encoding="utf-8")
+
         return {
             "ticker": ticker,
             "decision": result["decision"],
-            "final_state": {
-                "final_trade_decision": result["final_state"].get("final_trade_decision", ""),
-                "market_report": result["final_state"].get("market_report", ""),
-                "news_report": result["final_state"].get("news_report", ""),
-                "sentiment_report": result["final_state"].get("sentiment_report", ""),
-                "fundamentals_report": result["final_state"].get("fundamentals_report", ""),
-            },
+            "final_state": serializable_state,
             "elapsed": result["elapsed"],
             "stats": result["stats"],
         }
