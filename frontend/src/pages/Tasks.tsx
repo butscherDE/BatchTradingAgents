@@ -8,7 +8,7 @@ import { parseUtc, formatTime } from '../api/time'
 export default function Tasks() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
-  const [taskDetail, setTaskDetail] = useState<Record<string, unknown> | null>(null)
+  const [taskDetail, setTaskDetail] = useState<{ result?: unknown; error?: string; payload?: unknown } | null>(null)
 
   const page = parseInt(searchParams.get('page') || '0')
   const pageSize = parseInt(searchParams.get('size') || '20')
@@ -49,17 +49,12 @@ export default function Tasks() {
   queryParams.set('offset', String(page * pageSize))
   if (statusFilter) queryParams.set('status', statusFilter)
   if (modelFilter) queryParams.set('model_tier', modelFilter)
+  if (typeFilter) queryParams.set('task_type', typeFilter)
+  if (tickerFilter) queryParams.set('ticker', tickerFilter)
 
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['tasks', page, statusFilter, typeFilter, tickerFilter, modelFilter],
     queryFn: () => fetchJson<TaskItem[]>(`/api/tasks?${queryParams.toString()}`),
-  })
-
-  // Client-side filters for type and ticker (not in API yet)
-  const filtered = tasks.filter(t => {
-    if (typeFilter && t.task_type !== typeFilter) return false
-    if (tickerFilter && !(t.ticker || '').toLowerCase().includes(tickerFilter.toLowerCase())) return false
-    return true
   })
 
   const cancelMutation = useMutation({
@@ -192,6 +187,7 @@ export default function Tasks() {
           <option value="full_analysis">full_analysis</option>
           <option value="merge_and_allocate">merge_and_allocate</option>
           <option value="watchlist_discovery">watchlist_discovery</option>
+          <option value="watchlist_prune">watchlist_prune</option>
         </select>
         <select value={modelFilter} onChange={e => setFilter('model', e.target.value)}>
           <option value="">All models</option>
@@ -229,7 +225,7 @@ export default function Tasks() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t: TaskItem) => {
+              {tasks.map((t: TaskItem) => {
                 let duration: string
                 let elapsed: number
                 if (t.started_at && t.completed_at) {
@@ -255,7 +251,7 @@ export default function Tasks() {
                     } else {
                       setExpandedTask(t.task_id)
                       try {
-                        const detail = await fetchJson<Record<string, unknown>>(`/api/tasks/${t.task_id}`)
+                        const detail = await fetchJson<{ result?: unknown; error?: string; payload?: unknown }>(`/api/tasks/${t.task_id}`)
                         setTaskDetail(detail)
                       } catch { setTaskDetail(null) }
                     }
@@ -286,7 +282,7 @@ export default function Tasks() {
                     <tr>
                       <td colSpan={8} style={{ padding: '12px 16px', background: 'var(--surface)' }}>
                         <div style={{ fontSize: 12 }}>
-                          {taskDetail.result && (
+                          {!!taskDetail.result && (
                             <div style={{ marginBottom: 8 }}>
                               <strong style={{ color: 'var(--accent)' }}>Result:</strong>
                               <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--text)', maxHeight: 300, overflow: 'auto' }}>
@@ -297,10 +293,10 @@ export default function Tasks() {
                           {taskDetail.error && (
                             <div style={{ marginBottom: 8 }}>
                               <strong style={{ color: 'var(--red)' }}>Error:</strong>
-                              <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--red)' }}>{taskDetail.error as string}</pre>
+                              <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--red)' }}>{taskDetail.error}</pre>
                             </div>
                           )}
-                          {taskDetail.payload && (
+                          {!!taskDetail.payload && (
                             <div>
                               <strong style={{ color: 'var(--text-dim)' }}>Payload:</strong>
                               <pre style={{ marginTop: 4, whiteSpace: 'pre-wrap', color: 'var(--text-dim)', maxHeight: 200, overflow: 'auto' }}>
@@ -320,7 +316,7 @@ export default function Tasks() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12, fontSize: 13 }}>
             <span style={{ color: 'var(--text-dim)' }}>
-              Page {page + 1} · Showing {filtered.length} tasks
+              Page {page + 1} · Showing {tasks.length} tasks
             </span>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               <select

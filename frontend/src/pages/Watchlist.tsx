@@ -78,7 +78,7 @@ export default function Watchlist() {
   })
 
   const analyzeMutation = useMutation({
-    mutationFn: (symbols?: string[]) => {
+    mutationFn: (symbols: string[] | undefined) => {
       const params = new URLSearchParams({ account_id: accountId })
       if (symbols && symbols.length === 1) params.set('symbol', symbols[0]!)
       return fetch(`/api/watchlist/analyze?${params.toString()}`, { method: 'POST' }).then(async r => {
@@ -169,7 +169,7 @@ export default function Watchlist() {
           Analyze Selected ({selected.size})
         </button>
         <button
-          onClick={() => { if (confirm(`Run full analysis for all ${activeCount} tickers?`)) analyzeMutation.mutate() }}
+          onClick={() => { if (confirm(`Run full analysis for all ${activeCount} tickers?`)) analyzeMutation.mutate(undefined) }}
           disabled={analyzeMutation.isPending || !accountId}
         >
           {analyzeMutation.isPending ? 'Submitting...' : `Analyze All (${activeCount})`}
