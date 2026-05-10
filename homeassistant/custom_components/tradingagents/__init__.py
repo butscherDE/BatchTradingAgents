@@ -2,14 +2,25 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_PASSWORD, Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import DOMAIN, VERSION
 from .coordinator import TradingAgentsCoordinator
 
 PLATFORMS = [Platform.SENSOR, Platform.SWITCH]
+CARD_JS_PATH = Path(__file__).parent / "www" / "tradingagents-proposals-card.js"
+CARD_URL = f"/{DOMAIN}/tradingagents-proposals-card.js"
+
+
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    hass.http.register_static_path(CARD_URL, str(CARD_JS_PATH), cache_headers=False)
+    add_extra_js_url(hass, f"{CARD_URL}?v={VERSION}")
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

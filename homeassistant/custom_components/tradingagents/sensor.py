@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -48,6 +50,17 @@ SENSORS = [
 ]
 
 
+def _device_info(entry: ConfigEntry) -> DeviceInfo:
+    host = entry.data[CONF_HOST]
+    port = entry.data[CONF_PORT]
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name=f"TradingAgents ({host}:{port})",
+        manufacturer="BatchTradingAgents",
+        model="Service",
+    )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -74,6 +87,7 @@ class TradingAgentsSensor(CoordinatorEntity[TradingAgentsCoordinator], SensorEnt
         self._attr_unique_id = f"{entry.entry_id}_{self._key}"
         self._attr_icon = sensor_def.get("icon")
         self._attr_native_unit_of_measurement = sensor_def.get("unit")
+        self._attr_device_info = _device_info(entry)
 
     @property
     def native_value(self):

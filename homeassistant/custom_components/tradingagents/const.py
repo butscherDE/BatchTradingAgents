@@ -1,4 +1,5 @@
 DOMAIN = "tradingagents"
+VERSION = "1.0.0"
 CONF_HOST = "host"
 CONF_PORT = "port"
 CONF_PASSWORD = "password"
