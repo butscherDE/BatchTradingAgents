@@ -125,6 +125,7 @@ export default function NewsFeed() {
               <th>Time</th>
               <th>Headline</th>
               <th>Symbols</th>
+              <th>Source</th>
               <th>Status</th>
               <th>Score</th>
             </tr>
@@ -137,6 +138,7 @@ export default function NewsFeed() {
                 </td>
                 <td>{a.headline}</td>
                 <td>{a.symbols.join(', ')}</td>
+                <td style={{ fontSize: 11, color: 'var(--text-dim)' }}>{a.source || '—'}</td>
                 <td><span className={`badge badge-${a.status}`}>{a.status}</span></td>
                 <td>{(a.quick_result as any)?.score?.toFixed(2) ?? '—'}</td>
               </tr>
