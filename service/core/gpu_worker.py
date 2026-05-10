@@ -221,7 +221,8 @@ class GpuWorker:
     def _watchlist_discovery(self, payload: dict) -> dict:
         from service.core.news_screener import evaluate_watchlist_addition
         from cli.position_risk import STRATEGY_THRESHOLDS
-        symbol = payload.get("symbols", [""])[0] or payload.get("ticker", "")
+        symbols = payload.get("symbols", [])
+        symbol = symbols[0] if symbols else payload.get("ticker", "")
         strategy = payload.get("strategy", "balanced")
         thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
         return evaluate_watchlist_addition(
@@ -230,6 +231,7 @@ class GpuWorker:
             symbol=symbol,
             strategy=strategy,
             strategy_instruction=thresholds.get("instruction", ""),
+            num_symbols=len(symbols),
             ollama_url=self.config.gpu.ollama_url,
             model=self.config.gpu.quick_model,
         )

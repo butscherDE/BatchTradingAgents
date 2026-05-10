@@ -13,16 +13,24 @@ def screen_news_quick(
     model: str,
 ) -> dict:
     """Quick screening: is this news worth investigating further?"""
-    prompt = f"""You are a trading news screener. Evaluate whether this news article could materially affect the investment thesis for any of the mentioned tickers.
+    num_symbols = len(symbols)
+    prompt = f"""You are a trading news screener. Evaluate whether this news article contains a SPECIFIC, NAMED CATALYST for any of the mentioned tickers.
 
 **Headline:** {headline}
 **Summary:** {summary or "(none)"}
 **Symbols:** {", ".join(symbols) if symbols else "(none mentioned)"}
+**Number of symbols tagged:** {num_symbols}
+
+IMPORTANT RULES:
+- Only score above 0.3 if the headline or summary describes a concrete event SPECIFIC to that ticker (e.g., earnings, contract win, FDA ruling, executive change, guidance revision).
+- If the article tags 4+ symbols, it is likely a roundup or listicle. Score 0.0 unless the summary explicitly names a material event for a specific ticker.
+- Generic market commentary ("stocks to watch", "market hits record high", "sector outlook") is ALWAYS 0.0-0.2 regardless of which tickers are tagged.
+- The ticker merely appearing in a symbol list is NOT evidence of relevance.
 
 Rate the relevance on a scale of 0.0 to 1.0:
-- 0.0-0.3: Noise (routine analyst notes, minor price targets, general market commentary)
-- 0.4-0.6: Possibly relevant (sector news, competitor developments, moderate guidance changes)
-- 0.7-1.0: Highly material (earnings surprise, FDA decision, M&A, fraud, major contract, guidance revision)
+- 0.0-0.2: Noise (roundups, listicles, generic market commentary, "stocks to watch")
+- 0.3-0.5: Possibly relevant (sector-specific news naming this company, competitor M&A)
+- 0.6-1.0: Highly material (earnings surprise, FDA decision, M&A, fraud, major contract, guidance revision directly about this ticker)
 
 Respond in this exact JSON format:
 {{"score": <float>, "reasoning": "<one sentence>", "affected_ticker": "<most affected symbol or null>"}}"""
@@ -144,6 +152,7 @@ def evaluate_watchlist_addition(
     symbol: str,
     strategy: str,
     strategy_instruction: str,
+    num_symbols: int,
     ollama_url: str,
     model: str,
 ) -> dict:
@@ -152,23 +161,28 @@ def evaluate_watchlist_addition(
 
 **Strategy description:** {strategy_instruction}
 
-A news article just came in for a ticker that is NOT currently on our watchlist.
+A news article just came in that mentions a ticker NOT currently on our watchlist.
+Decide whether this news justifies adding the ticker to active monitoring — this means
+committing GPU resources to run full analysis on every future article about this stock.
 
 **Ticker:** {symbol}
 **Headline:** {headline}
 **Summary:** {summary or "(none)"}
+**Total symbols tagged in this article:** {num_symbols}
 
-Should we ADD this ticker to our **{strategy}** watchlist for further monitoring and potential investment?
+Should we ADD this ticker to our **{strategy}** watchlist?
 
-Add to watchlist if:
-- The news suggests a significant catalyst that fits the {strategy} risk profile
-- The ticker is in a sector aligned with this strategy
-- There's a time-sensitive opportunity warranting analysis
+Add ONLY if ALL of the following are true:
+- The headline or summary describes a SPECIFIC event about THIS ticker (not a market-wide roundup)
+- The event is a significant catalyst that fits the {strategy} risk profile
+- There is a clear, time-sensitive opportunity warranting analysis
 
 Do NOT add if:
+- The article tags many symbols and is a listicle/roundup ("top stocks to watch", "market recap")
+- The summary does not mention this specific ticker by name or describe an event unique to it
 - It's routine news (analyst price target changes, minor upgrades/downgrades)
-- The ticker doesn't fit the {strategy} approach (e.g., a speculative biotech for a conservative strategy)
-- The news is negative with no contrarian opportunity relevant to this strategy
+- The ticker doesn't fit the {strategy} approach
+- The news is generic market or sector commentary that happens to tag this symbol
 
 Respond in JSON:
 {{"add": true|false, "reasoning": "<one sentence>"}}"""
