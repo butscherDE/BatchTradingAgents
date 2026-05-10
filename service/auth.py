@@ -22,6 +22,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         if path in ("/api/auth/login", "/api/health"):
             return await call_next(request)
 
