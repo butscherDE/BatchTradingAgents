@@ -6,9 +6,10 @@ import Holdings from './pages/Holdings'
 import Tasks from './pages/Tasks'
 import Watchlist from './pages/Watchlist'
 import Proposals from './pages/Proposals'
+import Login from './pages/Login'
 import { WebSocketProvider, useWebSocket } from './api/websocket'
 import { fetchJson, NewsSourceStatus } from './api/client'
-import { useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
 function Sidebar() {
@@ -83,6 +84,17 @@ function Sidebar() {
 }
 
 export default function App() {
+  const [authenticated, setAuthenticated] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    fetch('/api/auth/check')
+      .then(r => setAuthenticated(r.ok))
+      .catch(() => setAuthenticated(true))  // If auth not configured (no middleware), allow through
+  }, [])
+
+  if (authenticated === null) return null  // Loading
+  if (!authenticated) return <Login onLogin={() => setAuthenticated(true)} />
+
   return (
     <WebSocketProvider>
       <div className="app">

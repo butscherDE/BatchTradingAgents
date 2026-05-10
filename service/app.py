@@ -7,7 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.config import ServiceConfig, load_config
@@ -1465,6 +1465,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Auth middleware (only active if password is configured)
+    from service.config import load_config as _load_cfg
+    _cfg = _load_cfg()
+    if _cfg.auth_password:
+        from service.auth import AuthMiddleware, hash_password
+        app.add_middleware(
+            AuthMiddleware,
+            password_hash=hash_password(_cfg.auth_password),
+            secret_key=_cfg.auth_secret,
+        )
+
     from service.api.news import router as news_router
     from service.api.tasks import router as tasks_router
     from service.api.holdings import router as holdings_router
@@ -1480,6 +1491,48 @@ def create_app() -> FastAPI:
     app.include_router(proposals_router)
     app.include_router(ws_router)
     app.include_router(status_router)
+
+    @app.post("/api/auth/login")
+    async def login(request: Request):
+        from fastapi.responses import JSONResponse as JR
+        from service.auth import verify_password, hash_password as _hp, AuthMiddleware, SESSION_COOKIE
+
+        body = await request.json()
+        password = body.get("password", "")
+
+        if not _cfg.auth_password:
+            return JR({"error": "Auth not configured"}, status_code=503)
+
+        if not verify_password(password, _hp(_cfg.auth_password)):
+            return JR({"error": "Invalid password"}, status_code=401)
+
+        # Find the middleware instance to create session
+        from service.auth import _sign
+        import time
+        payload = str(int(time.time()))
+        sig = _sign(_cfg.auth_secret, payload)
+        token = f"{payload}.{sig}"
+
+        response = JR({"ok": True})
+        response.set_cookie(
+            SESSION_COOKIE, token,
+            max_age=86400 * 7,
+            httponly=True,
+            samesite="strict",
+        )
+        return response
+
+    @app.post("/api/auth/logout")
+    async def logout():
+        from fastapi.responses import JSONResponse as JR
+        from service.auth import SESSION_COOKIE
+        response = JR({"ok": True})
+        response.delete_cookie(SESSION_COOKIE)
+        return response
+
+    @app.get("/api/auth/check")
+    async def auth_check():
+        return {"authenticated": True}
 
     @app.get("/")
     async def root():

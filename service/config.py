@@ -51,6 +51,8 @@ class ServiceConfig(BaseSettings):
     port: int = 8000
     database_path: str = "./data/service.db"
     redis_url: str = "redis://localhost:6379/0"
+    auth_password: str = ""
+    auth_secret: str = "change-me-in-production"
     gpu: GpuConfig = Field(default_factory=GpuConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
@@ -78,6 +80,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     redis_raw = raw.get("redis", {})
     watchlist_raw = raw.get("watchlist", {})
     polling_raw = raw.get("polling", {})
+    auth_raw = raw.get("auth", {})
 
     accounts = {}
     for name, acct in accounts_raw.items():
@@ -96,6 +99,8 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
         port=service_raw.get("port", 8000),
         database_path=db_raw.get("path", "./data/service.db"),
         redis_url=redis_raw.get("url", "redis://localhost:6379/0"),
+        auth_password=auth_raw.get("password", ""),
+        auth_secret=auth_raw.get("secret", "change-me-in-production"),
         gpu=GpuConfig(**gpu_raw),
         evaluation=EvaluationConfig(**eval_raw),
         watchlist=WatchlistConfig(
