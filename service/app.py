@@ -153,6 +153,7 @@ async def lifespan(app: FastAPI):
     _scheduler = GpuScheduler(_config.redis_url)
     try:
         await _scheduler.connect()
+        await _scheduler.flush_queues()
 
         # Start result listener FIRST — before resubmitting tasks,
         # so we don't miss "running" events from the GPU worker

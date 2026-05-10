@@ -30,6 +30,10 @@ class GpuScheduler:
     async def connect(self):
         self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
 
+    async def flush_queues(self):
+        """Clear task queues. Called on startup before re-submitting from DB."""
+        await self._redis.delete(QUICK_QUEUE, DEEP_QUEUE)
+
     async def close(self):
         if self._redis:
             await self._redis.close()
