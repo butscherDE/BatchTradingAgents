@@ -98,28 +98,28 @@ async def _seed_watchlist(config_tickers: list[str]):
 
 
 async def _recover_orphaned_tasks():
-    """Re-queue tasks that were 'running' when the service last crashed."""
-    from sqlalchemy import select, update
+    """Re-queue tasks that were 'running' or 'queued' when the service last stopped."""
+    from sqlalchemy import select, or_
 
     async with get_db_session() as session:
         result = await session.execute(
-            select(GpuTask).where(GpuTask.status == TaskStatus.running)
+            select(GpuTask).where(
+                or_(GpuTask.status == TaskStatus.running, GpuTask.status == TaskStatus.queued)
+            )
         )
         orphaned = result.scalars().all()
 
         if not orphaned:
             return
 
-        logger.info(f"Recovering {len(orphaned)} orphaned tasks from previous crash")
+        logger.info(f"Recovering {len(orphaned)} orphaned tasks from previous shutdown")
 
         for task in orphaned:
-            # Reset to queued — the worker will re-process them
             task.status = TaskStatus.queued
             task.started_at = None
 
         await session.commit()
 
-    # Re-submit to Redis queues (scheduler may not be connected yet, defer to after connect)
     global _orphaned_tasks
     _orphaned_tasks = orphaned
 
@@ -167,7 +167,7 @@ async def lifespan(app: FastAPI):
                     payload=task.payload or {},
                     ticker=task.ticker,
                     priority=task.priority,
-                ))
+                ), task_id=task.task_id)
             logger.info(f"Re-submitted {len(_orphaned_tasks)} orphaned tasks to Redis")
             _orphaned_tasks.clear()
     except Exception as e:

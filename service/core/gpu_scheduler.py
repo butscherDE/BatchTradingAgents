@@ -34,8 +34,9 @@ class GpuScheduler:
         if self._redis:
             await self._redis.close()
 
-    async def submit(self, spec: TaskSpec) -> str:
-        task_id = str(uuid.uuid4())
+    async def submit(self, spec: TaskSpec, task_id: Optional[str] = None) -> str:
+        if task_id is None:
+            task_id = str(uuid.uuid4())
         task_data = {
             "task_id": task_id,
             "model_tier": spec.model_tier,
