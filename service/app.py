@@ -1476,6 +1476,14 @@ def create_app() -> FastAPI:
             secret_key=_cfg.auth_secret,
         )
 
+    from starlette.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
+
     from service.api.news import router as news_router
     from service.api.tasks import router as tasks_router
     from service.api.holdings import router as holdings_router
