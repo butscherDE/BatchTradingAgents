@@ -1,0 +1,18 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to TradingAgents",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "password": "Password (leave empty if auth disabled)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the TradingAgents service",
+      "invalid_auth": "Invalid password"
+    }
+  }
+}

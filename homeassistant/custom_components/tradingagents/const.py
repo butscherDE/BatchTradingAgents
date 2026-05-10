@@ -1,0 +1,6 @@
+DOMAIN = "tradingagents"
+CONF_HOST = "host"
+CONF_PORT = "port"
+CONF_PASSWORD = "password"
+DEFAULT_PORT = 8000
+SCAN_INTERVAL_SECONDS = 10
