@@ -1,11 +1,14 @@
 """Unified LLM call interface — abstracts Ollama vs OpenAI-compatible APIs."""
 
-import json
+import re
 
 import httpx
 import requests
 
 from service.config import ProviderConfig
+
+
+_THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 
 def call_llm_sync(provider_config: ProviderConfig, model: str, prompt: str) -> str:
@@ -56,12 +59,14 @@ def _call_openai_sync(config: ProviderConfig, model: str, prompt: str) -> str:
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
+            "chat_template_kwargs": {"enable_thinking": False},
         },
         timeout=120,
     )
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    content = data["choices"][0]["message"]["content"]
+    return _strip_think_tags(content)
 
 
 async def _call_openai_async(config: ProviderConfig, model: str, prompt: str) -> str:
@@ -81,8 +86,14 @@ async def _call_openai_async(config: ProviderConfig, model: str, prompt: str) ->
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
+                "chat_template_kwargs": {"enable_thinking": False},
             },
         )
         resp.raise_for_status()
         data = resp.json()
-        return data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
+        return _strip_think_tags(content)
+
+
+def _strip_think_tags(text: str) -> str:
+    return _THINK_RE.sub("", text)
