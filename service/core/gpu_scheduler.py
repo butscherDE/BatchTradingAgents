@@ -189,7 +189,7 @@ class GpuScheduler:
         first_provider = sorted(self._providers, key=lambda n: self._providers[n].priority)[0]
         target_key = f"gpu:provider:{first_provider}:queue"
         while True:
-            item = await self._redis.rpoplpush(old_key, target_key)
+            item = await self._redis.lpop(old_key)
             if item is None:
                 break
-        await self._redis.delete(old_key)
+            await self._redis.rpush(target_key, item)
