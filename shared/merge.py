@@ -10,6 +10,10 @@ def _get_llm(config: dict):
     """Create a deep-thinking LLM from config."""
     llm_kwargs = {}
     provider = config.get("llm_provider", "").lower()
+
+    if config.get("api_key"):
+        llm_kwargs["api_key"] = config["api_key"]
+
     if provider == "google" and config.get("google_thinking_level"):
         llm_kwargs["thinking_level"] = config["google_thinking_level"]
     elif provider == "openai" and config.get("openai_reasoning_effort"):
