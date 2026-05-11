@@ -94,12 +94,8 @@ export default function Tasks() {
 
       <div className="stat-grid">
         <div className="stat-card">
-          <h3>Quick Queue</h3>
-          <div className="value">{stats?.queue_depth_quick ?? '—'}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Deep Queue</h3>
-          <div className="value">{stats?.queue_depth_deep ?? '—'}</div>
+          <h3>Queue</h3>
+          <div className="value">{stats?.queue_depth ?? '—'}</div>
         </div>
         <div className="stat-card">
           <h3>Completed</h3>

@@ -38,8 +38,7 @@ export interface TaskItem {
 }
 
 export interface TaskStats {
-  queue_depth_quick: number
-  queue_depth_deep: number
+  queue_depth: number
   total_completed: number
   total_failed: number
   current_model: string | null

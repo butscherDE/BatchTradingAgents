@@ -36,8 +36,7 @@ class TaskResponse(BaseModel):
 
 
 class TaskStats(BaseModel):
-    queue_depth_quick: int = 0
-    queue_depth_deep: int = 0
+    queue_depth: int = 0
     total_completed: int = 0
     total_failed: int = 0
     current_model: Optional[str] = None

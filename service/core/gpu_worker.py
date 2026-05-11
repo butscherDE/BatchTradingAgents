@@ -12,8 +12,7 @@ import redis
 from service.config import load_config, ServiceConfig
 
 
-QUICK_QUEUE = "gpu:queue:quick"
-DEEP_QUEUE = "gpu:queue:deep"
+TASK_QUEUE = "gpu:queue:tasks"
 RESULT_QUEUE = "gpu:results:queue"
 STATUS_CHANNEL = "gpu:status"
 
@@ -34,18 +33,19 @@ class GpuWorker:
         self._publish_status("starting", "Worker starting up")
 
         while self._running:
-            # Check if paused
             if self._is_paused():
                 self._publish_status("paused", "Paused — waiting for resume")
                 time.sleep(2)
                 continue
 
-            queue, tier = self._pick_queue()
-            if queue is None:
+            raw = self._redis.lpop(TASK_QUEUE)
+            if raw is None:
                 self._publish_status("idle", "Waiting for tasks")
                 time.sleep(0.5)
                 continue
 
+            task = json.loads(raw)
+            tier = task.get("model_tier", "quick")
             needed_model = (
                 self.config.gpu.quick_model if tier == "quick"
                 else self.config.gpu.deep_model
@@ -53,44 +53,10 @@ class GpuWorker:
             if self._current_model != needed_model:
                 self._switch_model(needed_model, tier)
 
-            batch_count = 0
-            while self._running and batch_count < self.config.gpu.max_batch_before_yield:
-                raw = self._redis.lpop(queue)
-                if raw is None:
-                    break
-
-                task = json.loads(raw)
-                self._execute_task(task)
-                batch_count += 1
-                self._task_count += 1
+            self._execute_task(task)
+            self._task_count += 1
 
         self._publish_status("stopped", "Worker shut down")
-
-    def _pick_queue(self) -> tuple[str | None, str | None]:
-        quick_emergency = self._has_emergency(QUICK_QUEUE)
-        deep_emergency = self._has_emergency(DEEP_QUEUE)
-
-        if quick_emergency:
-            return QUICK_QUEUE, "quick"
-        if deep_emergency:
-            return DEEP_QUEUE, "deep"
-
-        quick_len = self._redis.llen(QUICK_QUEUE)
-        deep_len = self._redis.llen(DEEP_QUEUE)
-
-        if quick_len == 0 and deep_len == 0:
-            return None, None
-
-        if quick_len >= deep_len:
-            return QUICK_QUEUE, "quick"
-        return DEEP_QUEUE, "deep"
-
-    def _has_emergency(self, queue: str) -> bool:
-        raw = self._redis.lindex(queue, 0)
-        if raw:
-            task = json.loads(raw)
-            return task.get("priority", 1) == 0
-        return False
 
     def _switch_model(self, model: str, tier: str):
         self._publish_status("switching_model", f"Loading {model}")

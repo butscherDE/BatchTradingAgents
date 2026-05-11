@@ -10,7 +10,6 @@ class GpuConfig(BaseSettings):
     quick_model: str = "qwen3:8b"
     deep_model: str = "qwen3:32b"
     ollama_url: str = "http://localhost:11434"
-    max_batch_before_yield: int = 50
 
 
 class EvaluationConfig(BaseSettings):

@@ -7,8 +7,7 @@ from typing import Optional
 import redis.asyncio as aioredis
 
 
-QUICK_QUEUE = "gpu:queue:quick"
-DEEP_QUEUE = "gpu:queue:deep"
+TASK_QUEUE = "gpu:queue:tasks"
 RESULT_QUEUE = "gpu:results:queue"
 STATUS_CHANNEL = "gpu:status"
 
@@ -31,8 +30,8 @@ class GpuScheduler:
         self._redis = aioredis.from_url(self._redis_url, decode_responses=True)
 
     async def flush_queues(self):
-        """Clear task queues. Called on startup before re-submitting from DB."""
-        await self._redis.delete(QUICK_QUEUE, DEEP_QUEUE)
+        """Clear task queue. Called on startup before re-submitting from DB."""
+        await self._redis.delete(TASK_QUEUE)
 
     async def close(self):
         if self._redis:
@@ -51,19 +50,16 @@ class GpuScheduler:
             "created_at": datetime.datetime.utcnow().isoformat(),
         }
 
-        queue = QUICK_QUEUE if spec.model_tier == "quick" else DEEP_QUEUE
-
         if spec.priority == 0:
-            await self._redis.lpush(queue, json.dumps(task_data))
+            await self._redis.lpush(TASK_QUEUE, json.dumps(task_data))
         else:
-            await self._redis.rpush(queue, json.dumps(task_data))
+            await self._redis.rpush(TASK_QUEUE, json.dumps(task_data))
 
         return task_id
 
     async def get_queue_depths(self) -> dict[str, int]:
-        quick = await self._redis.llen(QUICK_QUEUE)
-        deep = await self._redis.llen(DEEP_QUEUE)
-        return {"quick": quick, "deep": deep}
+        total = await self._redis.llen(TASK_QUEUE)
+        return {"quick": 0, "deep": 0, "total": total}
 
     async def get_worker_status(self) -> Optional[dict]:
         raw = await self._redis.get("gpu:worker:status")
@@ -72,14 +68,13 @@ class GpuScheduler:
         return None
 
     async def remove_task(self, task_id: str, model_tier: str):
-        """Remove a specific task from its Redis queue (best-effort)."""
-        queue = QUICK_QUEUE if model_tier == "quick" else DEEP_QUEUE
-        items = await self._redis.lrange(queue, 0, -1)
+        """Remove a specific task from the queue (best-effort)."""
+        items = await self._redis.lrange(TASK_QUEUE, 0, -1)
         for item in items:
             try:
                 data = json.loads(item)
                 if data.get("task_id") == task_id:
-                    await self._redis.lrem(queue, 1, item)
+                    await self._redis.lrem(TASK_QUEUE, 1, item)
                     return
             except (json.JSONDecodeError, TypeError):
                 continue
@@ -89,9 +84,8 @@ class GpuScheduler:
         await self._redis.set(f"gpu:cancel:{task_id}", "1", ex=300)
 
     async def clear_queues(self):
-        """Delete all tasks from both queues."""
-        await self._redis.delete(QUICK_QUEUE)
-        await self._redis.delete(DEEP_QUEUE)
+        """Delete all tasks from the queue."""
+        await self._redis.delete(TASK_QUEUE)
 
     async def pause(self):
         """Pause the GPU worker (finishes current task, then waits)."""

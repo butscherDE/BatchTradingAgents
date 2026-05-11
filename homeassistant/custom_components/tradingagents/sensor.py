@@ -20,14 +20,8 @@ SENSORS = [
         "icon": "mdi:robot",
     },
     {
-        "key": "queue_depth_quick",
-        "name": "Quick Queue",
-        "icon": "mdi:tray-full",
-        "unit": "tasks",
-    },
-    {
-        "key": "queue_depth_deep",
-        "name": "Deep Queue",
+        "key": "queue_depth",
+        "name": "Task Queue",
         "icon": "mdi:tray-full",
         "unit": "tasks",
     },

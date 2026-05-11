@@ -139,7 +139,7 @@ async def _replay(since: str):
     from service.config import load_config
     from service.db.engine import get_async_engine, get_async_session_factory, init_db
     from service.db.models import NewsArticle, GpuTask, InvestigationStatus, TaskStatus
-    from service.core.gpu_scheduler import GpuScheduler, TaskSpec, QUICK_QUEUE
+    from service.core.gpu_scheduler import GpuScheduler, TaskSpec
     from sqlalchemy import select, update
 
     config = load_config()

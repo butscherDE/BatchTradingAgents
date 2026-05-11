@@ -84,8 +84,7 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
         worker_state = "paused"
 
     return TaskStats(
-        queue_depth_quick=depths.get("quick", 0),
-        queue_depth_deep=depths.get("deep", 0),
+        queue_depth=depths.get("total", 0),
         total_completed=completed.scalar() or 0,
         total_failed=failed.scalar() or 0,
         current_model=worker_status.get("current_model") if worker_status else None,

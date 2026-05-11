@@ -42,8 +42,7 @@ class TradingAgentsCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
             return {
                 "worker_state": stats.get("worker_state"),
-                "queue_depth_quick": stats.get("queue_depth_quick", 0),
-                "queue_depth_deep": stats.get("queue_depth_deep", 0),
+                "queue_depth": stats.get("queue_depth", 0),
                 "alpaca_status": news_sources.get("alpaca", {}).get("status", "unknown"),
                 "yfinance_status": news_sources.get("yfinance", {}).get("status", "unknown"),
                 "yfinance_failures": news_sources.get("yfinance", {}).get("consecutive_failures", 0),
