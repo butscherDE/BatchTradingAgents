@@ -134,10 +134,11 @@ class RemoteWorker:
             raise ValueError(f"Unknown task type: {task_type}")
 
     async def _screen_news(self, payload: dict) -> dict:
-        from service.core.news_screener import screen_news_quick
+        from service.core.news_screener import _parse_json_response
+        if "headline" not in payload:
+            return {"score": 0.0, "reasoning": "Missing headline in payload", "parse_error": True}
         model = self.provider_config.quick_model
         response = await self._llm_call(model, _build_screen_prompt(payload))
-        from service.core.news_screener import _parse_json_response
         return _parse_json_response(response, default_score=0.0)
 
     async def _consolidate_news(self, payload: dict) -> dict:
