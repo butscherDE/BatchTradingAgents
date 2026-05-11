@@ -118,6 +118,212 @@ class RemoteWorker:
         data["provider"] = self.provider_name
         await self._redis.rpush(RESULT_QUEUE, json.dumps(data))
 
+    def _full_analysis_sync(self, payload: dict) -> dict:
+        from shared.analysis import run_single_ticker
+        from shared.config import build_graph_config
+        from pathlib import Path
+        import json as json_mod
+
+        ticker = payload["ticker"]
+        url = self.provider_config.url.rstrip("/")
+        if not url.endswith("/v1"):
+            url += "/v1"
+
+        config = build_graph_config(
+            provider="openai",
+            quick_model=self.provider_config.quick_model,
+            deep_model=self.provider_config.deep_model,
+            backend_url=url,
+        )
+        if self.provider_config.api_key:
+            config["api_key"] = self.provider_config.api_key
+        config["data_vendors"]["news_data"] = "database"
+        config["database_path"] = str(Path(self.config.database_path).resolve())
+
+        result = run_single_ticker(
+            ticker=ticker,
+            config=config,
+            past_context=payload.get("past_context", ""),
+        )
+
+        final_state = result["final_state"]
+
+        import datetime as dt
+        analysis_date = dt.datetime.utcnow().strftime("%Y-%m-%d")
+        reports_dir = Path("reports") / f"{ticker}_{analysis_date}"
+        try:
+            from cli.main import save_report_to_disk
+            save_report_to_disk(final_state, ticker, reports_dir)
+        except Exception:
+            pass
+
+        state_dir = Path("reports") / "_states"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        state_file = state_dir / f"{ticker}.json"
+        serializable_state = {
+            "generated_at": dt.datetime.utcnow().isoformat(),
+            "final_trade_decision": final_state.get("final_trade_decision", ""),
+            "market_report": final_state.get("market_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "investment_debate_state": final_state.get("investment_debate_state", {}),
+            "trader_investment_plan": final_state.get("trader_investment_plan", ""),
+            "risk_debate_state": final_state.get("risk_debate_state", {}),
+        }
+        state_file.write_text(json_mod.dumps(serializable_state, indent=2, default=str), encoding="utf-8")
+
+        return {
+            "ticker": ticker,
+            "decision": result["decision"],
+            "final_state": serializable_state,
+            "elapsed": result["elapsed"],
+            "stats": result["stats"],
+        }
+
+    def _merge_and_allocate_sync(self, payload: dict) -> dict:
+        from shared.merge import generate_merge_report, validate_merge_report
+        from shared.config import build_graph_config
+        from cli.order_parser import parse_orders
+
+        tickers_data = payload["tickers_data"]
+        account_id = payload.get("account_id")
+        strategy = payload.get("strategy", "balanced")
+        portfolio = payload.get("portfolio")
+
+        url = self.provider_config.url.rstrip("/")
+        if not url.endswith("/v1"):
+            url += "/v1"
+
+        config = build_graph_config(
+            provider="openai",
+            quick_model=self.provider_config.quick_model,
+            deep_model=self.provider_config.deep_model,
+            backend_url=url,
+        )
+        if self.provider_config.api_key:
+            config["api_key"] = self.provider_config.api_key
+
+        ticker_results = [
+            (t["ticker"], t["decision"], t["final_state"])
+            for t in tickers_data
+        ]
+
+        merge_report = generate_merge_report(
+            ticker_results=ticker_results,
+            config=config,
+            portfolio=portfolio,
+            strategy=strategy,
+        )
+
+        merge_checks = payload.get("merge_checks_override") or self.config.evaluation.merge_checks
+        validated_report = merge_report
+        for _ in range(merge_checks):
+            validated_report = validate_merge_report(
+                merge_report=validated_report,
+                ticker_results=ticker_results,
+                config=config,
+                strategy=strategy,
+                portfolio=portfolio,
+            )
+
+        allocation_data = []
+        proposed_orders = []
+        allocation_reasoning = ""
+
+        if portfolio:
+            try:
+                portfolio_dict = {
+                    "holdings": portfolio.get("holdings", {}),
+                    "cash": portfolio.get("cash", 0),
+                }
+                quotes = dict(portfolio.get("prices", {}))
+
+                try:
+                    from cli.alpaca_client import create_client, fetch_quotes
+                    acct = self.config.accounts.get(account_id)
+                    if acct:
+                        all_symbols = list(set(
+                            [t["ticker"] for t in tickers_data] +
+                            list(portfolio_dict["holdings"].keys())
+                        ))
+                        missing = [s for s in all_symbols if s not in quotes]
+                        if missing:
+                            client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+                            live_quotes = fetch_quotes(client, missing)
+                            quotes.update(live_quotes)
+                except Exception:
+                    pass
+
+                trade_plan, allocation_plan = parse_orders(
+                    merge_report=validated_report,
+                    portfolio_dict=portfolio_dict,
+                    quotes=quotes,
+                    pending=[],
+                    config=config,
+                    strategy=strategy,
+                    allocation_checks=payload.get("allocation_checks_override") or self.config.evaluation.allocation_checks,
+                )
+
+                holdings = portfolio_dict.get("holdings", {})
+                cash = portfolio_dict.get("cash", 0)
+                portfolio_value = sum(holdings.get(s, 0) * quotes.get(s, 0) for s in holdings) + cash
+
+                order_map = {}
+                for o in trade_plan.orders:
+                    order_map[o.symbol] = o.side
+
+                allocation_data = []
+                for a in allocation_plan.allocations:
+                    current_qty = holdings.get(a.symbol, 0)
+                    current_price = quotes.get(a.symbol, 0)
+                    current_value = current_qty * current_price
+                    current_pct = (current_value / portfolio_value * 100) if portfolio_value > 0 else 0
+                    target_value = portfolio_value * a.pct / 100 if portfolio_value > 0 else 0
+                    action = order_map.get(a.symbol, "hold")
+                    if current_value < 1 and target_value < 1:
+                        continue
+                    allocation_data.append({
+                        "symbol": a.symbol,
+                        "action": action,
+                        "current_pct": round(current_pct, 2),
+                        "target_pct": round(a.pct, 2),
+                        "current_value": round(current_value, 2),
+                        "target_value": round(target_value, 2),
+                        "current_qty": current_qty,
+                        "price": round(current_price, 2) if current_price else None,
+                    })
+
+                allocation_reasoning = allocation_plan.reasoning
+                proposed_orders = [
+                    {"ticker": o.symbol, "side": o.side, "qty": o.qty}
+                    for o in trade_plan.orders
+                ]
+            except Exception as e:
+                allocation_reasoning = f"Allocation failed: {e}"
+                portfolio_value = 0
+
+        return {
+            "account_id": account_id,
+            "merge_report": validated_report,
+            "tickers": [t["ticker"] for t in tickers_data],
+            "ticker_data": [
+                {
+                    "ticker": t["ticker"],
+                    "decision": t["decision"],
+                    "reasoning": t["final_state"].get("final_trade_decision", "")[:500],
+                }
+                for t in tickers_data
+            ],
+            "strategy": strategy,
+            "proposed_orders": proposed_orders,
+            "allocation": allocation_data,
+            "allocation_reasoning": allocation_reasoning,
+            "cash_pct": allocation_plan.cash_pct if 'allocation_plan' in dir() else None,
+            "portfolio_value": portfolio_value if 'portfolio_value' in dir() else None,
+            "cash_after": (portfolio_value * allocation_plan.cash_pct / 100) if 'allocation_plan' in dir() and 'portfolio_value' in dir() and portfolio_value else None,
+        }
+
     async def _llm_call(self, model: str, prompt: str) -> str:
         return await call_llm_async(self.provider_config, model, prompt)
 
@@ -132,8 +338,10 @@ class RemoteWorker:
             return await self._watchlist_discovery(payload)
         elif task_type == "watchlist_prune":
             return await self._watchlist_prune(payload)
-        elif task_type in ("full_analysis", "merge_and_allocate"):
-            raise ValueError(f"{task_type} not supported on remote workers (requires local filesystem)")
+        elif task_type == "full_analysis":
+            return await asyncio.to_thread(self._full_analysis_sync, payload)
+        elif task_type == "merge_and_allocate":
+            return await asyncio.to_thread(self._merge_and_allocate_sync, payload)
         else:
             raise ValueError(f"Unknown task type: {task_type}")
 
