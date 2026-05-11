@@ -175,5 +175,7 @@ class OpenAIClient(BaseLLMClient):
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:
-        """Validate model for the provider."""
+        """Validate model for the provider. Skip if using a custom base_url."""
+        if self.base_url:
+            return True
         return validate_model(self.provider, self.model)
