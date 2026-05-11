@@ -11,6 +11,12 @@ export default function Tasks() {
   const [taskDetail, setTaskDetail] = useState<{ result?: unknown; error?: string; payload?: unknown } | null>(null)
 
   const [showQueueDetail, setShowQueueDetail] = useState(false)
+  const [showRetryModal, setShowRetryModal] = useState(false)
+  const [retrySince, setRetrySince] = useState(() => {
+    const d = new Date()
+    d.setHours(d.getHours() - 1)
+    return d.toISOString().slice(0, 16)
+  })
 
   const page = parseInt(searchParams.get('page') || '0')
   const pageSize = parseInt(searchParams.get('size') || '20')
@@ -197,6 +203,12 @@ export default function Tasks() {
           style={{ width: 100 }}
         />
         <button
+          onClick={() => setShowRetryModal(true)}
+          style={{ background: 'var(--yellow)', color: 'var(--bg)' }}
+        >
+          Retry Failed
+        </button>
+        <button
           onClick={() => { if (confirm('Cancel all queued tasks?')) cancelAllMutation.mutate() }}
           disabled={cancelAllMutation.isPending}
           style={{ background: 'var(--red)', marginLeft: 'auto' }}
@@ -342,6 +354,42 @@ export default function Tasks() {
             </div>
           </div>
         </>
+      )}
+
+      {showRetryModal && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowRetryModal(false)}>
+          <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 24, minWidth: 340 }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0 }}>Retry Failed Tasks</h2>
+            <p style={{ fontSize: 13, color: 'var(--text-dim)' }}>Re-queue all failed tasks since:</p>
+            <input
+              type="datetime-local"
+              value={retrySince}
+              onChange={e => setRetrySince(e.target.value)}
+              style={{ width: '100%', fontSize: 14, padding: '6px 8px', marginBottom: 16 }}
+            />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowRetryModal(false)}>Cancel</button>
+              <button
+                onClick={async () => {
+                  const since = new Date(retrySince).toISOString()
+                  const resp = await fetch(`/api/tasks/retry-failed?since=${encodeURIComponent(since)}`, { method: 'POST' })
+                  if (resp.ok) {
+                    const data = await resp.json()
+                    alert(`Retried ${data.retried} tasks`)
+                    queryClient.invalidateQueries({ queryKey: ['tasks'] })
+                    queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+                  } else {
+                    alert('Failed to retry tasks')
+                  }
+                  setShowRetryModal(false)
+                }}
+                style={{ background: 'var(--green)', color: 'var(--bg)' }}
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showQueueDetail && (

@@ -208,3 +208,48 @@ async def cancel_all_queued(session: AsyncSession = Depends(get_session)):
     await session.commit()
 
     return {"cancelled_count": result.rowcount}
+
+
+@router.post("/retry-failed")
+async def retry_failed_tasks(
+    since: str = Query(..., description="ISO datetime to look back from"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Re-queue all failed tasks since a given datetime."""
+    import datetime as dt
+
+    from service.app import get_scheduler
+    from sqlalchemy import update
+
+    since_dt = dt.datetime.fromisoformat(since)
+
+    result = await session.execute(
+        select(GpuTask)
+        .where(GpuTask.status == TaskStatus.failed)
+        .where(GpuTask.completed_at >= since_dt)
+    )
+    tasks = result.scalars().all()
+
+    if not tasks:
+        return {"retried": 0}
+
+    scheduler = get_scheduler()
+    from service.core.gpu_scheduler import TaskSpec
+
+    retried = 0
+    for task in tasks:
+        task.status = TaskStatus.queued
+        task.error = None
+        task.started_at = None
+        task.completed_at = None
+        await scheduler.submit(TaskSpec(
+            model_tier=task.model_tier,
+            task_type=task.task_type,
+            payload=task.payload or {},
+            ticker=task.ticker,
+            priority=task.priority,
+        ), task_id=task.task_id)
+        retried += 1
+
+    await session.commit()
+    return {"retried": retried}
