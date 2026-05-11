@@ -29,6 +29,7 @@ export interface TaskItem {
   model_tier: string
   task_type: string
   ticker: string | null
+  provider: string | null
   priority: number
   status: string
   created_at: string

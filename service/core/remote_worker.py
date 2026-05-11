@@ -83,17 +83,17 @@ class RemoteWorker:
 
         started_at = datetime.datetime.utcnow().isoformat()
 
-        await self._redis.rpush(RESULT_QUEUE, json.dumps({
+        await self._push_result({
             "task_id": task_id,
             "task_type": task_type,
             "ticker": ticker,
             "status": "running",
             "started_at": started_at,
-        }))
+        })
 
         try:
             result = await self._dispatch(task_type, task.get("payload", {}))
-            await self._redis.rpush(RESULT_QUEUE, json.dumps({
+            await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
@@ -101,10 +101,10 @@ class RemoteWorker:
                 "result": result,
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
-            }))
+            })
         except Exception as e:
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
-            await self._redis.rpush(RESULT_QUEUE, json.dumps({
+            await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
@@ -112,7 +112,11 @@ class RemoteWorker:
                 "error": error_detail,
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
-            }))
+            })
+
+    async def _push_result(self, data: dict):
+        data["provider"] = self.provider_name
+        await self._redis.rpush(RESULT_QUEUE, json.dumps(data))
 
     async def _llm_call(self, model: str, prompt: str) -> str:
         return await call_llm_async(self.provider_config, model, prompt)

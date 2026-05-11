@@ -10,7 +10,6 @@ export default function Tasks() {
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [taskDetail, setTaskDetail] = useState<{ result?: unknown; error?: string; payload?: unknown } | null>(null)
 
-  const [showQueueDetail, setShowQueueDetail] = useState(false)
   const [showRetryModal, setShowRetryModal] = useState(false)
   const [retrySince, setRetrySince] = useState(() => {
     const d = new Date()
@@ -24,6 +23,7 @@ export default function Tasks() {
   const typeFilter = searchParams.get('type') || ''
   const tickerFilter = searchParams.get('ticker') || ''
   const modelFilter = searchParams.get('model') || ''
+  const providerFilter = searchParams.get('provider') || ''
 
   const setFilter = (key: string, value: string) => {
     const params = new URLSearchParams(searchParams)
@@ -59,9 +59,10 @@ export default function Tasks() {
   if (modelFilter) queryParams.set('model_tier', modelFilter)
   if (typeFilter) queryParams.set('task_type', typeFilter)
   if (tickerFilter) queryParams.set('ticker', tickerFilter)
+  if (providerFilter) queryParams.set('provider', providerFilter)
 
   const { data: tasks = [], isLoading } = useQuery({
-    queryKey: ['tasks', page, statusFilter, typeFilter, tickerFilter, modelFilter],
+    queryKey: ['tasks', page, statusFilter, typeFilter, tickerFilter, modelFilter, providerFilter],
     queryFn: () => fetchJson<TaskItem[]>(`/api/tasks?${queryParams.toString()}`),
   })
 
@@ -101,45 +102,66 @@ export default function Tasks() {
       <h1>Task Manager</h1>
 
       <div className="stat-grid">
-        <div className="stat-card" onClick={() => setShowQueueDetail(true)} style={{ cursor: 'pointer' }}>
-          <h3>Queue</h3>
-          <div className="value">{stats?.queue_depth ?? '—'}</div>
-          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>click for detail</div>
-        </div>
-        <div className="stat-card">
-          <h3>Completed</h3>
-          <div className="value positive">{stats?.total_completed ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Failed</h3>
-          <div className="value negative">{stats?.total_failed ?? 0}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Workers</h3>
-          <div style={{ fontSize: 12 }}>
-            {stats?.providers?.map(p => (
-              <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <span>
-                  <strong>{p.name}:</strong>{' '}
-                  <span style={{ color: p.state === 'executing' ? 'var(--green)' : p.state === 'paused' ? 'var(--yellow)' : 'var(--text-dim)' }}>
-                    {p.state ?? 'offline'}
-                  </span>
-                  {p.active_tasks > 0 && <span style={{ color: 'var(--text-dim)' }}> ({p.active_tasks}/{p.max_concurrent})</span>}
-                </span>
-                <button
-                  onClick={async (e) => {
-                    e.stopPropagation()
-                    const action = p.state === 'paused' || p.state === 'pausing' ? 'resume' : 'pause'
-                    await fetch(`/api/tasks/${action}?provider=${p.name}`, { method: 'POST' })
-                    queryClient.invalidateQueries({ queryKey: ['taskStats'] })
-                  }}
-                  style={{ fontSize: 10, padding: '1px 5px', background: p.state === 'paused' ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
-                >
-                  {p.state === 'paused' || p.state === 'pausing' ? '▶' : '⏸'}
-                </button>
-              </div>
-            )) ?? <span style={{ color: 'var(--text-dim)' }}>—</span>}
-          </div>
+        <div className="stat-card" style={{ gridColumn: '1 / -1' }}>
+          <table style={{ width: '100%', fontSize: 13 }}>
+            <thead>
+              <tr>
+                <th>Provider</th>
+                <th>State</th>
+                <th>Queued</th>
+                <th>Quick</th>
+                <th>Deep</th>
+                <th>Active</th>
+                <th>Limit</th>
+                <th>Completed</th>
+                <th>Failed</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {stats?.providers?.map(p => (
+                <tr key={p.name}>
+                  <td><strong>{p.name}</strong></td>
+                  <td>
+                    <span className={`badge badge-${p.state === 'executing' ? 'running' : p.state === 'idle' ? 'completed' : p.state ?? 'unknown'}`}>
+                      {p.state ?? 'offline'}
+                    </span>
+                  </td>
+                  <td>{p.queue_depth}</td>
+                  <td>{p.quick_queued}</td>
+                  <td>{p.deep_queued}</td>
+                  <td>{p.active_tasks}/{p.max_concurrent}</td>
+                  <td>{p.max_queue < 0 ? '∞' : p.max_queue}</td>
+                  <td className="positive">—</td>
+                  <td className="negative">—</td>
+                  <td>
+                    <button
+                      onClick={async () => {
+                        const action = p.state === 'paused' || p.state === 'pausing' ? 'resume' : 'pause'
+                        await fetch(`/api/tasks/${action}?provider=${p.name}`, { method: 'POST' })
+                        queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+                      }}
+                      style={{ fontSize: 11, padding: '2px 8px', background: p.state === 'paused' ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
+                    >
+                      {p.state === 'paused' || p.state === 'pausing' ? 'Resume' : 'Pause'}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              <tr style={{ fontWeight: 'bold', borderTop: '1px solid var(--text-dim)' }}>
+                <td>Total</td>
+                <td></td>
+                <td>{stats?.queue_depth ?? 0}</td>
+                <td>{stats?.providers?.reduce((s, p) => s + p.quick_queued, 0) ?? 0}</td>
+                <td>{stats?.providers?.reduce((s, p) => s + p.deep_queued, 0) ?? 0}</td>
+                <td>{stats?.providers?.reduce((s, p) => s + p.active_tasks, 0) ?? 0}</td>
+                <td></td>
+                <td className="positive">{stats?.total_completed ?? 0}</td>
+                <td className="negative">{stats?.total_failed ?? 0}</td>
+                <td></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
         <div className="stat-card">
           <h3>WebSocket</h3>
@@ -192,9 +214,15 @@ export default function Tasks() {
           <option value="watchlist_prune">watchlist_prune</option>
         </select>
         <select value={modelFilter} onChange={e => setFilter('model', e.target.value)}>
-          <option value="">All models</option>
+          <option value="">All tiers</option>
           <option value="quick">quick</option>
           <option value="deep">deep</option>
+        </select>
+        <select value={providerFilter} onChange={e => setFilter('provider', e.target.value)}>
+          <option value="">All providers</option>
+          {stats?.providers?.map(p => (
+            <option key={p.name} value={p.name}>{p.name}</option>
+          ))}
         </select>
         <input
           placeholder="Filter ticker..."
@@ -241,6 +269,7 @@ export default function Tasks() {
                 <th>Time</th>
                 <th>Type</th>
                 <th>Ticker</th>
+                <th>Provider</th>
                 <th>Model</th>
                 <th>Status</th>
                 <th>Duration</th>
@@ -285,6 +314,7 @@ export default function Tasks() {
                     </td>
                     <td>{t.task_type}</td>
                     <td>{t.ticker ?? '—'}</td>
+                    <td>{t.provider ?? '—'}</td>
                     <td>{t.model_tier}</td>
                     <td><span className={`badge badge-${t.status}`}>{t.status}</span></td>
                     <td>{duration}</td>
@@ -304,7 +334,7 @@ export default function Tasks() {
                   </tr>
                   {expandedTask === t.task_id && taskDetail && (
                     <tr>
-                      <td colSpan={8} style={{ padding: '12px 16px', background: 'var(--surface)' }}>
+                      <td colSpan={9} style={{ padding: '12px 16px', background: 'var(--surface)' }}>
                         <div style={{ fontSize: 12 }}>
                           {!!taskDetail.result && (
                             <div style={{ marginBottom: 8 }}>
@@ -404,41 +434,6 @@ export default function Tasks() {
                 Retry
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {showQueueDetail && (
-        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowQueueDetail(false)}>
-          <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 24, minWidth: 500, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0 }}>Queue Detail — Total: {stats?.queue_depth ?? 0}</h2>
-            <table>
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>State</th>
-                  <th>Queued</th>
-                  <th>Quick</th>
-                  <th>Deep</th>
-                  <th>Active</th>
-                  <th>Limit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stats?.providers?.map(p => (
-                  <tr key={p.name}>
-                    <td><strong>{p.name}</strong></td>
-                    <td><span className={`badge badge-${p.state === 'executing' ? 'running' : p.state === 'idle' ? 'completed' : p.state ?? 'unknown'}`}>{p.state ?? 'offline'}</span></td>
-                    <td>{p.queue_depth}</td>
-                    <td>{p.quick_queued}</td>
-                    <td>{p.deep_queued}</td>
-                    <td>{p.active_tasks}/{p.max_concurrent}</td>
-                    <td>{p.max_queue < 0 ? '∞' : p.max_queue}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <button onClick={() => setShowQueueDetail(false)} style={{ marginTop: 16 }}>Close</button>
           </div>
         </div>
       )}

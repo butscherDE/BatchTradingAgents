@@ -27,6 +27,7 @@ class TaskResponse(BaseModel):
     model_tier: str
     task_type: str
     ticker: Optional[str] = None
+    provider: Optional[str] = None
     priority: int
     status: str
     created_at: datetime.datetime

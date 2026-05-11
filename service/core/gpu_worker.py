@@ -87,13 +87,13 @@ class OllamaWorker:
 
         started_at = datetime.datetime.utcnow().isoformat()
 
-        self._redis.rpush(RESULT_QUEUE, json.dumps({
+        self._push_result({
             "task_id": task_id,
             "task_type": task_type,
             "ticker": ticker,
             "status": "running",
             "started_at": started_at,
-        }))
+        })
 
         import concurrent.futures
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -108,7 +108,7 @@ class OllamaWorker:
                     if self._is_cancelled(task_id):
                         future.cancel()
                         executor.shutdown(wait=False)
-                        self._redis.rpush(RESULT_QUEUE, json.dumps({
+                        self._push_result({
                             "task_id": task_id,
                             "task_type": task_type,
                             "ticker": ticker,
@@ -116,10 +116,10 @@ class OllamaWorker:
                             "error": "Cancelled by user",
                             "started_at": started_at,
                             "completed_at": datetime.datetime.utcnow().isoformat(),
-                        }))
+                        })
                         return
 
-            self._redis.rpush(RESULT_QUEUE, json.dumps({
+            self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
@@ -127,11 +127,11 @@ class OllamaWorker:
                 "result": result,
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
-            }))
+            })
         except Exception as e:
             import traceback
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
-            self._redis.rpush(RESULT_QUEUE, json.dumps({
+            self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
                 "ticker": ticker,
@@ -139,9 +139,13 @@ class OllamaWorker:
                 "error": error_detail,
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
-            }))
+            })
         finally:
             executor.shutdown(wait=False)
+
+    def _push_result(self, data: dict):
+        data["provider"] = self.provider_name
+        self._redis.rpush(RESULT_QUEUE, json.dumps(data))
 
     def _llm_call(self, model: str, prompt: str) -> str:
         return call_llm_sync(self.provider_config, model, prompt)

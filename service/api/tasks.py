@@ -26,6 +26,7 @@ async def list_tasks(
     model_tier: Optional[str] = Query(default=None),
     task_type: Optional[str] = Query(default=None),
     ticker: Optional[str] = Query(default=None),
+    provider: Optional[str] = Query(default=None),
     session: AsyncSession = Depends(get_session),
 ):
     query = select(GpuTask).order_by(GpuTask.created_at.desc())
@@ -38,6 +39,8 @@ async def list_tasks(
         query = query.where(GpuTask.task_type == task_type)
     if ticker:
         query = query.where(GpuTask.ticker.ilike(f"%{ticker}%"))
+    if provider:
+        query = query.where(GpuTask.provider == provider)
 
     query = query.offset(offset).limit(limit)
     result = await session.execute(query)
@@ -50,6 +53,7 @@ async def list_tasks(
             model_tier=t.model_tier,
             task_type=t.task_type,
             ticker=t.ticker,
+            provider=t.provider,
             priority=t.priority,
             status=t.status.value if hasattr(t.status, "value") else t.status,
             created_at=t.created_at,

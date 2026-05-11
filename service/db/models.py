@@ -53,6 +53,7 @@ class GpuTask(Base):
     model_tier = Column(String, nullable=False)  # "quick" or "deep"
     task_type = Column(String, nullable=False)
     ticker = Column(String, nullable=True)
+    provider = Column(String, nullable=True)
     priority = Column(Integer, nullable=False, default=1)
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.queued)
     payload = Column(JSON, nullable=False, default=dict)

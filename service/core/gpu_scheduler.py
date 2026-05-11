@@ -59,7 +59,12 @@ class GpuScheduler:
 
         provider_name = await self._router.route(task_data)
         task_data["routed_to"] = provider_name
+        self._last_routed_to = provider_name
         return task_id
+
+    @property
+    def last_routed_to(self) -> str:
+        return getattr(self, "_last_routed_to", "unknown")
 
     async def get_queue_depths(self) -> dict[str, int]:
         total = 0

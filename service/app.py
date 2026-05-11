@@ -388,6 +388,7 @@ async def _listen_for_results():
                             .values(
                                 status=TaskStatus.running,
                                 started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
+                                provider=data.get("provider"),
                             )
                         )
                     else:
@@ -400,6 +401,7 @@ async def _listen_for_results():
                                 error=data.get("error"),
                                 started_at=datetime.datetime.fromisoformat(data["started_at"]) if data.get("started_at") else None,
                                 completed_at=datetime.datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+                                provider=data.get("provider"),
                             )
                         )
                     await session.commit()
