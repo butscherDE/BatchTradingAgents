@@ -48,6 +48,8 @@ export interface ProviderStatus {
   max_concurrent: number
   max_queue: number
   current_model: string | null
+  completed: number
+  failed: number
 }
 
 export interface TaskStats {

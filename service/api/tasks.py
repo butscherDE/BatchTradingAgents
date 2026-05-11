@@ -81,6 +81,21 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
         select(func.count()).where(GpuTask.status == TaskStatus.failed)
     )
 
+    # Per-provider completed/failed counts
+    provider_counts_result = await session.execute(
+        select(GpuTask.provider, GpuTask.status, func.count())
+        .where(GpuTask.status.in_([TaskStatus.completed, TaskStatus.failed]))
+        .where(GpuTask.provider.isnot(None))
+        .group_by(GpuTask.provider, GpuTask.status)
+    )
+    provider_counts: dict[str, dict[str, int]] = {}
+    for row in provider_counts_result:
+        pname, status_val, count = row[0], row[1], row[2]
+        if pname not in provider_counts:
+            provider_counts[pname] = {"completed": 0, "failed": 0}
+        status_str = status_val.value if hasattr(status_val, "value") else status_val
+        provider_counts[pname][status_str] = count
+
     worker_state = worker_status.get("state") if worker_status else None
 
     return TaskStats(
@@ -101,6 +116,8 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
                 max_concurrent=p["max_concurrent"],
                 max_queue=p["max_queue"],
                 current_model=p.get("current_model"),
+                completed=provider_counts.get(p["name"], {}).get("completed", 0),
+                failed=provider_counts.get(p["name"], {}).get("failed", 0),
             )
             for p in provider_detail
         ],

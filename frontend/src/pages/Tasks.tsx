@@ -132,8 +132,8 @@ export default function Tasks() {
                   <td>{p.deep_queued}</td>
                   <td>{p.active_tasks}/{p.max_concurrent}</td>
                   <td>{p.max_queue < 0 ? '∞' : p.max_queue}</td>
-                  <td className="positive">—</td>
-                  <td className="negative">—</td>
+                  <td className="positive">{p.completed}</td>
+                  <td className="negative">{p.failed}</td>
                   <td>
                     <button
                       onClick={async () => {

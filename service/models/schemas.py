@@ -46,6 +46,8 @@ class ProviderStatus(BaseModel):
     max_concurrent: int = 1
     max_queue: int = -1
     current_model: Optional[str] = None
+    completed: int = 0
+    failed: int = 0
 
 
 class TaskStats(BaseModel):
