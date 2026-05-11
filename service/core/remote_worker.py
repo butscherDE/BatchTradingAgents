@@ -52,12 +52,16 @@ class RemoteWorker:
             # Only pop if we have capacity (avoids unbounded in-memory buildup)
             active = int(await self._redis.get(self._active_key) or 0)
             if active >= self._max_concurrent:
+                await self._publish_status("executing", f"{active} tasks running (at capacity)")
                 await asyncio.sleep(0.5)
                 continue
 
             raw = await self._redis.lpop(self._queue_key)
             if raw is None:
-                await self._publish_status("idle", "Waiting for tasks")
+                if active > 0:
+                    await self._publish_status("executing", f"{active} tasks running")
+                else:
+                    await self._publish_status("idle", "Waiting for tasks")
                 await asyncio.sleep(0.5)
                 continue
 
