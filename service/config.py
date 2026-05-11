@@ -46,6 +46,14 @@ class PollingConfig(BaseSettings):
     yfinance_max_failures: int = 5
 
 
+class MetricsConfig(BaseSettings):
+    enabled: bool = False
+    influxdb_url: str = "http://localhost:8086"
+    influxdb_token: str = ""
+    influxdb_org: str = "trading"
+    influxdb_bucket: str = "trading_metrics"
+
+
 class AccountConfig(BaseSettings):
     api_key: str = ""
     api_secret: str = ""
@@ -67,6 +75,7 @@ class ServiceConfig(BaseSettings):
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     polling: PollingConfig = Field(default_factory=PollingConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     news_symbols: list[str] = Field(default_factory=lambda: ["*"])
@@ -93,6 +102,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     polling_raw = raw.get("polling", {})
     auth_raw = raw.get("auth", {})
     providers_raw = raw.get("providers", {})
+    metrics_raw = raw.get("metrics", {})
 
     accounts = {}
     for name, acct in accounts_raw.items():
@@ -147,6 +157,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             exclude=watchlist_raw.get("exclude", []),
         ),
         polling=PollingConfig(**polling_raw),
+        metrics=MetricsConfig(**metrics_raw),
         accounts=accounts,
         providers=providers,
         news_symbols=streams_raw.get("news_symbols", ["*"]),

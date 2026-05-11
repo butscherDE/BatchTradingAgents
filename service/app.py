@@ -289,6 +289,8 @@ async def _handle_news_article(article: dict):
         article_id = db_article.id
 
     ticker = symbols[0].upper() if symbols else None
+    from service.metrics import record_news_ingested
+    record_news_ingested(article.get("source", "unknown"), ticker or "unknown")
 
     if on_watchlist:
         # Normal news screening for watched tickers
@@ -1250,6 +1252,9 @@ async def _insert_article_silent(article: dict) -> int | None:
                 "headline": article["headline"],
                 "symbols": symbols,
             })
+            from service.metrics import record_news_ingested
+            ticker = symbols[0].upper() if symbols else "unknown"
+            record_news_ingested(article.get("source", "yfinance"), ticker)
             return db_article.id
         except Exception:
             await session.rollback()

@@ -12,6 +12,7 @@ import redis
 
 from service.config import load_config, ServiceConfig, ProviderConfig
 from service.core.llm_adapter import call_llm_sync
+from service.metrics import record_task_completed, record_token_usage, record_queue_depth, record_worker_utilization
 
 
 RESULT_QUEUE = "gpu:results:queue"
@@ -49,6 +50,9 @@ class OllamaWorker:
             raw = self._redis.lpop(self._queue_key)
             if raw is None:
                 self._publish_status("idle", "Waiting for tasks")
+                depth = self._redis.llen(self._queue_key)
+                record_queue_depth(self.provider_name, depth)
+                record_worker_utilization(self.provider_name, 0, 1)
                 time.sleep(0.5)
                 continue
 
@@ -129,6 +133,9 @@ class OllamaWorker:
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
             })
+            completed_at = datetime.datetime.utcnow()
+            duration = (completed_at - datetime.datetime.fromisoformat(started_at)).total_seconds()
+            record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "completed", duration)
         except Exception as e:
             import traceback
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
@@ -141,6 +148,8 @@ class OllamaWorker:
                 "started_at": started_at,
                 "completed_at": datetime.datetime.utcnow().isoformat(),
             })
+            duration = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(started_at)).total_seconds()
+            record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "failed", duration)
         finally:
             executor.shutdown(wait=False)
 
@@ -149,7 +158,9 @@ class OllamaWorker:
         self._redis.rpush(RESULT_QUEUE, json.dumps(data))
 
     def _llm_call(self, model: str, prompt: str) -> str:
-        return call_llm_sync(self.provider_config, model, prompt)
+        def _on_usage(prompt_tokens: int, completion_tokens: int):
+            record_token_usage(self.provider_name, model, prompt_tokens, completion_tokens)
+        return call_llm_sync(self.provider_config, model, prompt, on_usage=_on_usage)
 
     def _dispatch(self, task_type: str, payload: dict) -> dict:
         if task_type == "news_screen":

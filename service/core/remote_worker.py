@@ -13,6 +13,7 @@ import redis.asyncio as aioredis
 
 from service.config import load_config, ServiceConfig, ProviderConfig
 from service.core.llm_adapter import call_llm_async
+from service.metrics import record_task_completed, record_token_usage, record_queue_depth, record_worker_utilization
 
 
 RESULT_QUEUE = "gpu:results:queue"
@@ -63,6 +64,9 @@ class RemoteWorker:
                     await self._publish_status("executing", f"{active} tasks running")
                 else:
                     await self._publish_status("idle", "Waiting for tasks")
+                    depth = await self._redis.llen(self._queue_key)
+                    record_queue_depth(self.provider_name, depth)
+                    record_worker_utilization(self.provider_name, 0, self._max_concurrent)
                 await asyncio.sleep(0.5)
                 continue
 
@@ -104,6 +108,7 @@ class RemoteWorker:
 
         try:
             result = await self._dispatch(task_type, task.get("payload", {}))
+            completed_at = datetime.datetime.utcnow().isoformat()
             await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
@@ -111,10 +116,13 @@ class RemoteWorker:
                 "status": "completed",
                 "result": result,
                 "started_at": started_at,
-                "completed_at": datetime.datetime.utcnow().isoformat(),
+                "completed_at": completed_at,
             })
+            duration = (datetime.datetime.fromisoformat(completed_at) - datetime.datetime.fromisoformat(started_at)).total_seconds()
+            record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "completed", duration)
         except Exception as e:
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
+            completed_at = datetime.datetime.utcnow().isoformat()
             await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
@@ -122,8 +130,10 @@ class RemoteWorker:
                 "status": "failed",
                 "error": error_detail,
                 "started_at": started_at,
-                "completed_at": datetime.datetime.utcnow().isoformat(),
+                "completed_at": completed_at,
             })
+            duration = (datetime.datetime.fromisoformat(completed_at) - datetime.datetime.fromisoformat(started_at)).total_seconds()
+            record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "failed", duration)
 
     async def _push_result(self, data: dict):
         data["provider"] = self.provider_name
@@ -336,7 +346,9 @@ class RemoteWorker:
         }
 
     async def _llm_call(self, model: str, prompt: str) -> str:
-        return await call_llm_async(self.provider_config, model, prompt)
+        def _on_usage(prompt_tokens: int, completion_tokens: int):
+            record_token_usage(self.provider_name, model, prompt_tokens, completion_tokens)
+        return await call_llm_async(self.provider_config, model, prompt, on_usage=_on_usage)
 
     async def _dispatch(self, task_type: str, payload: dict) -> dict:
         if task_type == "news_screen":
