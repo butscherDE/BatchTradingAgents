@@ -38,6 +38,7 @@ class OllamaWorker:
         signal.signal(signal.SIGINT, self._handle_shutdown)
 
         self._publish_status("starting", "Worker starting up")
+        self._redis.set(self._active_key, 0)
 
         while self._running:
             if self._is_paused():

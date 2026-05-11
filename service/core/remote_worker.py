@@ -36,6 +36,7 @@ class RemoteWorker:
     async def run(self):
         self._redis = aioredis.from_url(self.config.redis_url, decode_responses=True)
         await self._publish_status("starting", "Worker starting up")
+        await self._redis.set(self._active_key, 0)
 
         if sys.platform != "win32":
             loop = asyncio.get_event_loop()
