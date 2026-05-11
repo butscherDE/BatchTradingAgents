@@ -156,8 +156,8 @@ export default function Tasks() {
                 <td>{stats?.providers?.reduce((s, p) => s + p.deep_queued, 0) ?? 0}</td>
                 <td>{stats?.providers?.reduce((s, p) => s + p.active_tasks, 0) ?? 0}</td>
                 <td></td>
-                <td className="positive">{stats?.total_completed ?? 0}</td>
-                <td className="negative">{stats?.total_failed ?? 0}</td>
+                <td className="positive">{stats?.providers?.reduce((s, p) => s + p.completed, 0) ?? 0}</td>
+                <td className="negative">{stats?.providers?.reduce((s, p) => s + p.failed, 0) ?? 0}</td>
                 <td></td>
               </tr>
             </tbody>
