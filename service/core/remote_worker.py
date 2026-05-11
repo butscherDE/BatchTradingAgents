@@ -136,7 +136,7 @@ class RemoteWorker:
     async def _screen_news(self, payload: dict) -> dict:
         from service.core.news_screener import _parse_json_response
         if "headline" not in payload:
-            return {"score": 0.0, "reasoning": "Missing headline in payload", "parse_error": True}
+            raise ValueError(f"Task payload missing 'headline'. Got keys: {list(payload.keys())}")
         model = self.provider_config.quick_model
         response = await self._llm_call(model, _build_screen_prompt(payload))
         return _parse_json_response(response, default_score=0.0)
@@ -144,7 +144,7 @@ class RemoteWorker:
     async def _consolidate_news(self, payload: dict) -> dict:
         from service.core.news_screener import _parse_json_response
         if not payload.get("articles"):
-            return {"events": [], "parse_error": True}
+            raise ValueError(f"Task payload missing 'articles'. Got keys: {list(payload.keys())}")
         model = self.provider_config.quick_model
         response = await self._llm_call(model, _build_consolidate_prompt(payload))
         return _parse_json_response(response, default_score=0.0)
@@ -152,7 +152,7 @@ class RemoteWorker:
     async def _investigate(self, payload: dict) -> dict:
         from service.core.news_screener import _parse_json_response
         if "headline" not in payload:
-            return {"verdict": "noise", "reasoning": "Missing headline in payload", "parse_error": True}
+            raise ValueError(f"Task payload missing 'headline'. Got keys: {list(payload.keys())}")
         model = self.provider_config.deep_model
         response = await self._llm_call(model, _build_investigate_prompt(payload))
         return _parse_json_response(response, default_score=0.0)
@@ -160,7 +160,7 @@ class RemoteWorker:
     async def _watchlist_discovery(self, payload: dict) -> dict:
         from service.core.news_screener import _parse_json_response
         if "headline" not in payload:
-            return {"add": False, "reasoning": "Missing headline in payload", "parse_error": True}
+            raise ValueError(f"Task payload missing 'headline'. Got keys: {list(payload.keys())}")
         from cli.position_risk import STRATEGY_THRESHOLDS
         symbols = payload.get("symbols", [])
         symbol = symbols[0] if symbols else payload.get("ticker", "")

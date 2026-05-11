@@ -110,7 +110,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     for name, prov in providers_raw.items():
         providers[name] = ProviderConfig(
             type=prov.get("type", "ollama"),
-            url=prov.get("url", prov.get("ollama_url", "http://localhost:11434")),
+            url=prov.get("url", "http://localhost:11434"),
             api_key=prov.get("api_key", ""),
             quick_model=prov.get("quick_model", "qwen3:8b"),
             deep_model=prov.get("deep_model", "qwen3:32b"),
