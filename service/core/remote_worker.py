@@ -126,7 +126,7 @@ class RemoteWorker:
 
         ticker = payload["ticker"]
         url = self.provider_config.url.rstrip("/")
-        if not url.endswith("/v1"):
+        if "/v1" not in url:
             url += "/v1"
 
         config = build_graph_config(
@@ -192,7 +192,7 @@ class RemoteWorker:
         portfolio = payload.get("portfolio")
 
         url = self.provider_config.url.rstrip("/")
-        if not url.endswith("/v1"):
+        if "/v1" not in url:
             url += "/v1"
 
         config = build_graph_config(

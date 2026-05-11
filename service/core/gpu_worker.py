@@ -252,7 +252,7 @@ class OllamaWorker:
 
         ticker = payload["ticker"]
         ollama_base = self.provider_config.url.rstrip("/")
-        if not ollama_base.endswith("/v1"):
+        if "/v1" not in ollama_base:
             ollama_base += "/v1"
 
         provider_type = "ollama" if self.provider_config.type == "ollama" else "openrouter"
@@ -316,7 +316,7 @@ class OllamaWorker:
         portfolio = payload.get("portfolio")
 
         ollama_base = self.provider_config.url.rstrip("/")
-        if not ollama_base.endswith("/v1"):
+        if "/v1" not in ollama_base:
             ollama_base += "/v1"
 
         provider_type = "ollama" if self.provider_config.type == "ollama" else "openrouter"
