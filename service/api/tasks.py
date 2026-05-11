@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from service.db.models import GpuTask, TaskStatus
+from service.db.models import GpuTask, NewsArticle, TaskStatus
 from service.models.schemas import TaskResponse, TaskStats, ProviderStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
@@ -253,3 +253,87 @@ async def retry_failed_tasks(
 
     await session.commit()
     return {"retried": retried}
+
+
+@router.post("/reprocess")
+async def reprocess_broken_tasks(
+    since: str = Query(..., description="ISO datetime to look back from"),
+    session: AsyncSession = Depends(get_session),
+):
+    """Re-queue tasks that completed with broken/incomplete payloads.
+
+    Looks up the original article from DB and rebuilds the full payload.
+    """
+    import datetime as dt
+
+    from service.app import get_scheduler
+    from service.core.gpu_scheduler import TaskSpec
+
+    since_dt = dt.datetime.fromisoformat(since)
+
+    # Find tasks that completed with parse_error or have incomplete payloads
+    result = await session.execute(
+        select(GpuTask)
+        .where(GpuTask.completed_at >= since_dt)
+        .where(GpuTask.task_type.in_(["news_screen", "watchlist_discovery", "investigation"]))
+        .where(
+            (GpuTask.status == TaskStatus.completed) | (GpuTask.status == TaskStatus.failed)
+        )
+    )
+    tasks = result.scalars().all()
+
+    scheduler = get_scheduler()
+    reprocessed = 0
+
+    for task in tasks:
+        payload = task.payload or {}
+
+        # Skip tasks that already have a headline — they're fine
+        if payload.get("headline"):
+            continue
+
+        # Need article_id to look up the article
+        article_id = payload.get("article_id")
+        if not article_id:
+            continue
+
+        # Look up the article from DB
+        article_result = await session.execute(
+            select(NewsArticle).where(NewsArticle.id == article_id)
+        )
+        article = article_result.scalar_one_or_none()
+        if not article:
+            continue
+
+        # Rebuild full payload
+        new_payload = {
+            "article_id": article.id,
+            "headline": article.headline,
+            "summary": article.summary or "",
+            "symbols": article.symbols or [],
+        }
+
+        # Preserve extra fields from original payload
+        for key in ("ticker", "strategy", "account_id", "current_thesis"):
+            if key in payload:
+                new_payload[key] = payload[key]
+
+        # Reset task and resubmit
+        task.status = TaskStatus.queued
+        task.result = None
+        task.error = None
+        task.started_at = None
+        task.completed_at = None
+        task.payload = new_payload
+
+        await scheduler.submit(TaskSpec(
+            model_tier=task.model_tier,
+            task_type=task.task_type,
+            payload=new_payload,
+            ticker=task.ticker,
+            priority=task.priority,
+        ), task_id=task.task_id)
+        reprocessed += 1
+
+    await session.commit()
+    return {"reprocessed": reprocessed}

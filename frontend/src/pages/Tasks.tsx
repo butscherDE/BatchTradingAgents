@@ -209,6 +209,22 @@ export default function Tasks() {
           Retry Failed
         </button>
         <button
+          onClick={async () => {
+            const since = prompt('Reprocess broken tasks since (ISO datetime):', new Date(Date.now() - 3600000).toISOString().slice(0, 16))
+            if (!since) return
+            const resp = await fetch(`/api/tasks/reprocess?since=${encodeURIComponent(new Date(since).toISOString())}`, { method: 'POST' })
+            if (resp.ok) {
+              const data = await resp.json()
+              alert(`Reprocessed ${data.reprocessed} tasks (rebuilt payloads from articles)`)
+              queryClient.invalidateQueries({ queryKey: ['tasks'] })
+              queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+            } else { alert('Failed to reprocess') }
+          }}
+          style={{ background: 'var(--accent)', color: 'var(--bg)' }}
+        >
+          Reprocess Broken
+        </button>
+        <button
           onClick={() => { if (confirm('Cancel all queued tasks?')) cancelAllMutation.mutate() }}
           disabled={cancelAllMutation.isPending}
           style={{ background: 'var(--red)', marginLeft: 'auto' }}
