@@ -135,6 +135,9 @@ class TradingAgentsGraph:
         kwargs = {}
         provider = self.config.get("llm_provider", "").lower()
 
+        if self.config.get("api_key"):
+            kwargs["api_key"] = self.config["api_key"]
+
         if provider == "google":
             thinking_level = self.config.get("google_thinking_level")
             if thinking_level:

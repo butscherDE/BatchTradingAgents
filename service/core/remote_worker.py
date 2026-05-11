@@ -130,7 +130,7 @@ class RemoteWorker:
             url += "/v1"
 
         config = build_graph_config(
-            provider="openai",
+            provider="openrouter",
             quick_model=self.provider_config.quick_model,
             deep_model=self.provider_config.deep_model,
             backend_url=url,
@@ -196,7 +196,7 @@ class RemoteWorker:
             url += "/v1"
 
         config = build_graph_config(
-            provider="openai",
+            provider="openrouter",
             quick_model=self.provider_config.quick_model,
             deep_model=self.provider_config.deep_model,
             backend_url=url,

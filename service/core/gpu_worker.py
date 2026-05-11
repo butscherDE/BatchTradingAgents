@@ -255,7 +255,7 @@ class OllamaWorker:
         if not ollama_base.endswith("/v1"):
             ollama_base += "/v1"
 
-        provider_type = "ollama" if self.provider_config.type == "ollama" else "openai"
+        provider_type = "ollama" if self.provider_config.type == "ollama" else "openrouter"
         config = build_graph_config(
             provider=provider_type,
             quick_model=self.provider_config.quick_model,
@@ -319,7 +319,7 @@ class OllamaWorker:
         if not ollama_base.endswith("/v1"):
             ollama_base += "/v1"
 
-        provider_type = "ollama" if self.provider_config.type == "ollama" else "openai"
+        provider_type = "ollama" if self.provider_config.type == "ollama" else "openrouter"
         config = build_graph_config(
             provider=provider_type,
             quick_model=self.provider_config.quick_model,
