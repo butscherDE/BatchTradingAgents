@@ -35,8 +35,9 @@ class GpuScheduler:
         self._router = ProviderRouter(self._redis, self._providers)
 
     async def flush_queues(self):
-        """Clear all provider queues. Called on startup before re-submitting from DB."""
+        """Clear all provider queues and reset active counters. Called on startup."""
         keys = [f"gpu:provider:{name}:queue" for name in self._providers]
+        keys += [f"gpu:provider:{name}:active" for name in self._providers]
         if keys:
             await self._redis.delete(*keys)
 
