@@ -31,7 +31,7 @@ class RemoteWorker:
         self._redis: aioredis.Redis | None = None
         self._running = True
         self._task_count = 0
-        self._semaphore = asyncio.Semaphore(self.provider_config.max_concurrent)
+        self._max_concurrent = self.provider_config.max_concurrent
 
     async def run(self):
         self._redis = aioredis.from_url(self.config.redis_url, decode_responses=True)
@@ -49,6 +49,12 @@ class RemoteWorker:
                 await asyncio.sleep(2)
                 continue
 
+            # Only pop if we have capacity (avoids unbounded in-memory buildup)
+            active = int(await self._redis.get(self._active_key) or 0)
+            if active >= self._max_concurrent:
+                await asyncio.sleep(0.5)
+                continue
+
             raw = await self._redis.lpop(self._queue_key)
             if raw is None:
                 await self._publish_status("idle", "Waiting for tasks")
@@ -56,19 +62,19 @@ class RemoteWorker:
                 continue
 
             task = json.loads(raw)
-            asyncio.create_task(self._execute_with_semaphore(task))
+            # Increment active immediately so the next loop iteration sees it
+            await self._redis.incr(self._active_key)
+            asyncio.create_task(self._execute_task_tracked(task))
 
         await self._publish_status("stopped", "Worker shut down")
         await self._redis.close()
 
-    async def _execute_with_semaphore(self, task: dict):
-        async with self._semaphore:
-            await self._redis.incr(self._active_key)
-            try:
-                await self._execute_task(task)
-            finally:
-                await self._redis.decr(self._active_key)
-                self._task_count += 1
+    async def _execute_task_tracked(self, task: dict):
+        try:
+            await self._execute_task(task)
+        finally:
+            await self._redis.decr(self._active_key)
+            self._task_count += 1
 
     async def _execute_task(self, task: dict):
         task_id = task["task_id"]
