@@ -292,15 +292,16 @@ async def _handle_news_article(article: dict):
 
     if on_watchlist:
         # Normal news screening for watched tickers
+        screen_payload = {
+            "article_id": article_id,
+            "headline": article["headline"],
+            "summary": article.get("summary", ""),
+            "symbols": symbols,
+        }
         task_id = await _scheduler.submit(TaskSpec(
             model_tier="quick",
             task_type="news_screen",
-            payload={
-                "article_id": article_id,
-                "headline": article["headline"],
-                "summary": article.get("summary", ""),
-                "symbols": symbols,
-            },
+            payload=screen_payload,
             ticker=ticker,
         ))
         async with get_db_session() as session:
@@ -311,7 +312,7 @@ async def _handle_news_article(article: dict):
                 ticker=ticker,
                 priority=1,
                 status=TaskStatus.queued,
-                payload={"article_id": article_id},
+                payload=screen_payload,
             )
             session.add(db_task)
             await session.commit()
@@ -319,17 +320,18 @@ async def _handle_news_article(article: dict):
         # Discovery: submit per account with their strategy
         for acct_name in discovery_accounts:
             acct = _config.accounts[acct_name]
+            discovery_payload = {
+                "article_id": article_id,
+                "headline": article["headline"],
+                "summary": article.get("summary", ""),
+                "symbols": symbols,
+                "account_id": acct_name,
+                "strategy": acct.strategy,
+            }
             task_id = await _scheduler.submit(TaskSpec(
                 model_tier="quick",
                 task_type="watchlist_discovery",
-                payload={
-                    "article_id": article_id,
-                    "headline": article["headline"],
-                    "summary": article.get("summary", ""),
-                    "symbols": symbols,
-                    "account_id": acct_name,
-                    "strategy": acct.strategy,
-                },
+                payload=discovery_payload,
                 ticker=ticker,
             ))
             async with get_db_session() as session:
@@ -340,7 +342,7 @@ async def _handle_news_article(article: dict):
                     ticker=ticker,
                     priority=1,
                     status=TaskStatus.queued,
-                    payload={"article_id": article_id, "account_id": acct_name},
+                    payload=discovery_payload,
                 )
                 session.add(db_task)
                 await session.commit()
@@ -481,17 +483,18 @@ async def _handle_screen_result(data: dict):
             )
             if affected_ticker:
                 current_thesis = _get_current_thesis(affected_ticker)
+                investigation_payload = {
+                    "article_id": primary_article_id,
+                    "headline": article.headline,
+                    "summary": article.summary or "",
+                    "symbols": article.symbols or [],
+                    "ticker": affected_ticker,
+                    "current_thesis": current_thesis,
+                }
                 task_id = await _scheduler.submit(TaskSpec(
                     model_tier="deep",
                     task_type="investigation",
-                    payload={
-                        "article_id": primary_article_id,
-                        "headline": article.headline,
-                        "summary": article.summary or "",
-                        "symbols": article.symbols or [],
-                        "ticker": affected_ticker,
-                        "current_thesis": current_thesis,
-                    },
+                    payload=investigation_payload,
                     ticker=affected_ticker,
                 ))
 
@@ -503,7 +506,7 @@ async def _handle_screen_result(data: dict):
                         ticker=affected_ticker,
                         priority=1,
                         status=TaskStatus.queued,
-                        payload={"article_id": primary_article_id},
+                        payload=investigation_payload,
                     )
                     session.add(db_task)
                     await session.commit()
@@ -796,22 +799,23 @@ async def _handle_discovery_result(data: dict):
                         )
                         art = art_result.scalar_one_or_none()
                     if art:
+                        screen_payload2 = {
+                            "article_id": article_id,
+                            "headline": art.headline,
+                            "summary": art.summary or "",
+                            "symbols": art.symbols or [ticker.upper()],
+                        }
                         task_id = await _scheduler.submit(TaskSpec(
                             model_tier="quick",
                             task_type="news_screen",
-                            payload={
-                                "article_id": article_id,
-                                "headline": art.headline,
-                                "summary": art.summary or "",
-                                "symbols": art.symbols or [ticker.upper()],
-                            },
+                            payload=screen_payload2,
                             ticker=ticker.upper(),
                         ))
                         async with get_db_session() as session:
                             session.add(GpuTask(
                                 task_id=task_id, model_tier="quick", task_type="news_screen",
                                 ticker=ticker.upper(), priority=1, status=TaskStatus.queued,
-                                payload={"article_id": article_id},
+                                payload=screen_payload2,
                             ))
                             await session.commit()
 
@@ -1264,15 +1268,16 @@ async def _ingest_batch(ticker: str, new_articles: list[dict]):
 
 async def _submit_news_screen(ticker: str, article_id: int, article: dict):
     """Submit a single news_screen task for one article."""
+    screen_payload = {
+        "article_id": article_id,
+        "headline": article["headline"],
+        "summary": article.get("summary", ""),
+        "symbols": article.get("symbols", [ticker]),
+    }
     task_id = await _scheduler.submit(TaskSpec(
         model_tier="quick",
         task_type="news_screen",
-        payload={
-            "article_id": article_id,
-            "headline": article["headline"],
-            "summary": article.get("summary", ""),
-            "symbols": article.get("symbols", [ticker]),
-        },
+        payload=screen_payload,
         ticker=ticker,
     ))
     async with get_db_session() as session:
@@ -1283,7 +1288,7 @@ async def _submit_news_screen(ticker: str, article_id: int, article: dict):
             ticker=ticker,
             priority=1,
             status=TaskStatus.queued,
-            payload={"article_id": article_id},
+            payload=screen_payload,
         )
         session.add(db_task)
         await session.commit()
