@@ -37,6 +37,18 @@ export interface TaskItem {
   error: string | null
 }
 
+export interface ProviderStatus {
+  name: string
+  state: string | null
+  queue_depth: number
+  quick_queued: number
+  deep_queued: number
+  active_tasks: number
+  max_concurrent: number
+  max_queue: number
+  current_model: string | null
+}
+
 export interface TaskStats {
   queue_depth: number
   total_completed: number
@@ -45,6 +57,7 @@ export interface TaskStats {
   worker_state: string | null
   model_switches: number
   tasks_per_minute: number
+  providers: ProviderStatus[]
 }
 
 export interface AccountSummary {

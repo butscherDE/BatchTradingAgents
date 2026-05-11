@@ -5,22 +5,29 @@ import json
 import signal
 import sys
 import time
+from functools import partial
 from pathlib import Path
 
 import redis
 
-from service.config import load_config, ServiceConfig
+from service.config import load_config, ServiceConfig, ProviderConfig
+from service.core.llm_adapter import call_llm_sync
 
 
-TASK_QUEUE = "gpu:queue:tasks"
 RESULT_QUEUE = "gpu:results:queue"
 STATUS_CHANNEL = "gpu:status"
 
 
-class GpuWorker:
-    def __init__(self, config: ServiceConfig):
+class OllamaWorker:
+    def __init__(self, config: ServiceConfig, provider_name: str):
         self.config = config
+        self.provider_name = provider_name
+        self.provider_config = config.providers[provider_name]
         self._redis = redis.from_url(config.redis_url, decode_responses=True)
+        self._queue_key = f"gpu:provider:{provider_name}:queue"
+        self._status_key = f"gpu:provider:{provider_name}:status"
+        self._active_key = f"gpu:provider:{provider_name}:active"
+        self._paused_key = f"gpu:provider:{provider_name}:paused"
         self._current_model: str | None = None
         self._running = True
         self._task_count = 0
@@ -38,7 +45,7 @@ class GpuWorker:
                 time.sleep(2)
                 continue
 
-            raw = self._redis.lpop(TASK_QUEUE)
+            raw = self._redis.lpop(self._queue_key)
             if raw is None:
                 self._publish_status("idle", "Waiting for tasks")
                 time.sleep(0.5)
@@ -47,13 +54,17 @@ class GpuWorker:
             task = json.loads(raw)
             tier = task.get("model_tier", "quick")
             needed_model = (
-                self.config.gpu.quick_model if tier == "quick"
-                else self.config.gpu.deep_model
+                self.provider_config.quick_model if tier == "quick"
+                else self.provider_config.deep_model
             )
             if self._current_model != needed_model:
                 self._switch_model(needed_model, tier)
 
-            self._execute_task(task)
+            self._redis.incr(self._active_key)
+            try:
+                self._execute_task(task)
+            finally:
+                self._redis.decr(self._active_key)
             self._task_count += 1
 
         self._publish_status("stopped", "Worker shut down")
@@ -69,7 +80,6 @@ class GpuWorker:
         task_type = task["task_type"]
         ticker = task.get("ticker")
 
-        # Check if task was already cancelled before we start
         if self._is_cancelled(task_id):
             return
 
@@ -77,7 +87,6 @@ class GpuWorker:
 
         started_at = datetime.datetime.utcnow().isoformat()
 
-        # Publish "started" so the API shows task as running
         self._redis.rpush(RESULT_QUEUE, json.dumps({
             "task_id": task_id,
             "task_type": task_type,
@@ -86,7 +95,6 @@ class GpuWorker:
             "started_at": started_at,
         }))
 
-        # Run dispatch in a thread so we can check for cancellation
         import concurrent.futures
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = executor.submit(self._dispatch, task_type, task.get("payload", {}))
@@ -135,6 +143,9 @@ class GpuWorker:
         finally:
             executor.shutdown(wait=False)
 
+    def _llm_call(self, model: str, prompt: str) -> str:
+        return call_llm_sync(self.provider_config, model, prompt)
+
     def _dispatch(self, task_type: str, payload: dict) -> dict:
         if task_type == "news_screen":
             return self._screen_news(payload)
@@ -155,33 +166,33 @@ class GpuWorker:
 
     def _screen_news(self, payload: dict) -> dict:
         from service.core.news_screener import screen_news_quick
+        model = self.provider_config.quick_model
         return screen_news_quick(
             headline=payload["headline"],
             summary=payload.get("summary", ""),
             symbols=payload.get("symbols", []),
-            ollama_url=self.config.gpu.ollama_url,
-            model=self.config.gpu.quick_model,
+            llm_call=partial(self._llm_call, model),
         )
 
     def _consolidate_news(self, payload: dict) -> dict:
         from service.core.news_screener import consolidate_news
+        model = self.provider_config.quick_model
         return consolidate_news(
             ticker=payload.get("ticker", ""),
             articles=payload.get("articles", []),
-            ollama_url=self.config.gpu.ollama_url,
-            model=self.config.gpu.quick_model,
+            llm_call=partial(self._llm_call, model),
         )
 
     def _investigate(self, payload: dict) -> dict:
         from service.core.news_screener import investigate_deep
+        model = self.provider_config.deep_model
         return investigate_deep(
             headline=payload["headline"],
             summary=payload.get("summary", ""),
             symbols=payload.get("symbols", []),
             ticker=payload.get("ticker", ""),
             current_thesis=payload.get("current_thesis", ""),
-            ollama_url=self.config.gpu.ollama_url,
-            model=self.config.gpu.deep_model,
+            llm_call=partial(self._llm_call, model),
         )
 
     def _watchlist_discovery(self, payload: dict) -> dict:
@@ -191,6 +202,7 @@ class GpuWorker:
         symbol = symbols[0] if symbols else payload.get("ticker", "")
         strategy = payload.get("strategy", "balanced")
         thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
+        model = self.provider_config.quick_model
         return evaluate_watchlist_addition(
             headline=payload["headline"],
             summary=payload.get("summary", ""),
@@ -198,8 +210,7 @@ class GpuWorker:
             strategy=strategy,
             strategy_instruction=thresholds.get("instruction", ""),
             num_symbols=len(symbols),
-            ollama_url=self.config.gpu.ollama_url,
-            model=self.config.gpu.quick_model,
+            llm_call=partial(self._llm_call, model),
         )
 
     def _watchlist_prune(self, payload: dict) -> dict:
@@ -210,41 +221,41 @@ class GpuWorker:
 
         if stage == "deep":
             from service.core.news_screener import confirm_watchlist_prune
+            model = self.provider_config.deep_model
             return confirm_watchlist_prune(
                 symbol=payload["symbol"],
                 strategy=strategy,
                 strategy_instruction=thresholds.get("instruction", ""),
                 recent_headlines=payload.get("recent_headlines", []),
                 quick_reasoning=payload.get("quick_reasoning", ""),
-                ollama_url=self.config.gpu.ollama_url,
-                model=self.config.gpu.deep_model,
+                llm_call=partial(self._llm_call, model),
             )
         else:
             from service.core.news_screener import evaluate_watchlist_prune
+            model = self.provider_config.quick_model
             return evaluate_watchlist_prune(
                 symbol=payload["symbol"],
                 strategy=strategy,
                 strategy_instruction=thresholds.get("instruction", ""),
                 recent_headlines=payload.get("recent_headlines", []),
-                ollama_url=self.config.gpu.ollama_url,
-                model=self.config.gpu.quick_model,
+                llm_call=partial(self._llm_call, model),
             )
 
     def _full_analysis(self, payload: dict) -> dict:
         from shared.analysis import run_single_ticker
         from shared.config import build_graph_config
-        from pathlib import Path
-        import json
+        import json as json_mod
 
         ticker = payload["ticker"]
-        ollama_base = self.config.gpu.ollama_url.rstrip("/")
+        ollama_base = self.provider_config.url.rstrip("/")
         if not ollama_base.endswith("/v1"):
             ollama_base += "/v1"
 
+        provider_type = "ollama" if self.provider_config.type == "ollama" else "openai"
         config = build_graph_config(
-            provider="ollama",
-            quick_model=self.config.gpu.quick_model,
-            deep_model=self.config.gpu.deep_model,
+            provider=provider_type,
+            quick_model=self.provider_config.quick_model,
+            deep_model=self.provider_config.deep_model,
             backend_url=ollama_base,
         )
         config["data_vendors"]["news_data"] = "database"
@@ -258,7 +269,6 @@ class GpuWorker:
 
         final_state = result["final_state"]
 
-        # Save report to disk with date suffix (same format as CLI)
         analysis_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         reports_dir = Path("reports") / f"{ticker}_{analysis_date}"
         try:
@@ -267,7 +277,6 @@ class GpuWorker:
         except Exception:
             pass
 
-        # Save the full state as JSON for the merge step (always latest per ticker)
         state_dir = Path("reports") / "_states"
         state_dir.mkdir(parents=True, exist_ok=True)
         state_file = state_dir / f"{ticker}.json"
@@ -282,7 +291,7 @@ class GpuWorker:
             "trader_investment_plan": final_state.get("trader_investment_plan", ""),
             "risk_debate_state": final_state.get("risk_debate_state", {}),
         }
-        state_file.write_text(json.dumps(serializable_state, indent=2, default=str), encoding="utf-8")
+        state_file.write_text(json_mod.dumps(serializable_state, indent=2, default=str), encoding="utf-8")
 
         return {
             "ticker": ticker,
@@ -297,19 +306,20 @@ class GpuWorker:
         from shared.config import build_graph_config
         from cli.order_parser import parse_orders
 
-        tickers_data = payload["tickers_data"]  # list of {ticker, decision, final_state}
+        tickers_data = payload["tickers_data"]
         account_id = payload.get("account_id")
         strategy = payload.get("strategy", "balanced")
         portfolio = payload.get("portfolio")
 
-        ollama_base = self.config.gpu.ollama_url.rstrip("/")
+        ollama_base = self.provider_config.url.rstrip("/")
         if not ollama_base.endswith("/v1"):
             ollama_base += "/v1"
 
+        provider_type = "ollama" if self.provider_config.type == "ollama" else "openai"
         config = build_graph_config(
-            provider="ollama",
-            quick_model=self.config.gpu.quick_model,
-            deep_model=self.config.gpu.deep_model,
+            provider=provider_type,
+            quick_model=self.provider_config.quick_model,
+            deep_model=self.provider_config.deep_model,
             backend_url=ollama_base,
         )
 
@@ -325,7 +335,6 @@ class GpuWorker:
             strategy=strategy,
         )
 
-        # Validate merge report (N passes)
         merge_checks = payload.get("merge_checks_override") or self.config.evaluation.merge_checks
         validated_report = merge_report
         for _ in range(merge_checks):
@@ -337,7 +346,6 @@ class GpuWorker:
                 portfolio=portfolio,
             )
 
-        # Generate allocation plan + concrete orders
         allocation_data = []
         proposed_orders = []
         allocation_reasoning = ""
@@ -348,10 +356,8 @@ class GpuWorker:
                     "holdings": portfolio.get("holdings", {}),
                     "cash": portfolio.get("cash", 0),
                 }
-                # Start with prices from portfolio fetch (most accurate for held positions)
                 quotes = dict(portfolio.get("prices", {}))
 
-                # Fetch additional quotes for tickers not already priced
                 try:
                     from cli.alpaca_client import create_client, fetch_quotes
                     acct = self.config.accounts.get(account_id)
@@ -378,15 +384,13 @@ class GpuWorker:
                     allocation_checks=payload.get("allocation_checks_override") or self.config.evaluation.allocation_checks,
                 )
 
-                # Compute current allocations for comparison
                 holdings = portfolio_dict.get("holdings", {})
                 cash = portfolio_dict.get("cash", 0)
                 portfolio_value = sum(holdings.get(s, 0) * quotes.get(s, 0) for s in holdings) + cash
 
-                # Build order lookup from trade_plan (the actual computed trades)
                 order_map = {}
                 for o in trade_plan.orders:
-                    order_map[o.symbol] = o.side  # "buy" or "sell"
+                    order_map[o.symbol] = o.side
 
                 allocation_data = []
                 for a in allocation_plan.allocations:
@@ -396,10 +400,8 @@ class GpuWorker:
                     current_pct = (current_value / portfolio_value * 100) if portfolio_value > 0 else 0
                     target_value = portfolio_value * a.pct / 100 if portfolio_value > 0 else 0
 
-                    # Action from computed orders, not LLM label
                     action = order_map.get(a.symbol, "hold")
 
-                    # Skip tickers with 0 current and 0 target (no position, no allocation)
                     if current_value < 1 and target_value < 1:
                         continue
 
@@ -450,12 +452,10 @@ class GpuWorker:
         }
 
     def _is_cancelled(self, task_id: str) -> bool:
-        """Check if a cancel signal exists for this task."""
         return bool(self._redis.get(f"gpu:cancel:{task_id}"))
 
     def _is_paused(self) -> bool:
-        """Check if the worker is paused."""
-        return bool(self._redis.get("gpu:paused"))
+        return bool(self._redis.get(self._paused_key))
 
     def _publish_status(self, state: str, message: str):
         status = {
@@ -464,20 +464,22 @@ class GpuWorker:
             "current_model": self._current_model,
             "task_count": self._task_count,
             "model_switches": self._model_switches,
+            "provider": self.provider_name,
             "timestamp": datetime.datetime.utcnow().isoformat(),
         }
-        self._redis.set("gpu:worker:status", json.dumps(status))
+        self._redis.set(self._status_key, json.dumps(status))
         self._redis.publish(STATUS_CHANNEL, json.dumps(status))
 
     def _handle_shutdown(self, signum, frame):
         self._running = False
 
 
-def main():
+def main(provider_name: str = "local"):
     config = load_config()
-    worker = GpuWorker(config)
+    worker = OllamaWorker(config, provider_name)
     worker.run()
 
 
 if __name__ == "__main__":
-    main()
+    name = sys.argv[1] if len(sys.argv) > 1 else "local"
+    main(name)

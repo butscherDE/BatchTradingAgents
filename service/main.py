@@ -1,4 +1,4 @@
-"""Service entry point — starts FastAPI + GPU worker subprocess."""
+"""Service entry point — starts FastAPI + GPU worker subprocesses."""
 
 import logging
 import multiprocessing
@@ -20,34 +20,48 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def _run_gpu_worker():
+def _run_ollama_worker(provider_name: str):
     from service.core.gpu_worker import main
-    main()
+    main(provider_name)
+
+
+def _run_remote_worker(provider_name: str):
+    from service.core.remote_worker import main
+    main(provider_name)
 
 
 def main():
     config = load_config()
 
-    # Start GPU worker as subprocess
-    worker_process = multiprocessing.Process(
-        target=_run_gpu_worker,
-        name="gpu-worker",
-        daemon=True,
-    )
-    worker_process.start()
-    logger.info(f"GPU worker started (PID {worker_process.pid})")
+    worker_processes = []
+    for name, provider_conf in config.providers.items():
+        if provider_conf.type == "ollama":
+            target = _run_ollama_worker
+        else:
+            target = _run_remote_worker
+
+        p = multiprocessing.Process(
+            target=target,
+            args=(name,),
+            name=f"gpu-worker-{name}",
+            daemon=True,
+        )
+        p.start()
+        worker_processes.append(p)
+        logger.info(f"Worker '{name}' started (PID {p.pid}, type={provider_conf.type})")
 
     import atexit
 
     def _shutdown():
-        logger.info("Shutdown signal received. Stopping GPU worker...")
-        worker_process.terminate()
-        worker_process.join(timeout=5)
+        logger.info("Shutdown signal received. Stopping workers...")
+        for p in worker_processes:
+            p.terminate()
+        for p in worker_processes:
+            p.join(timeout=5)
         logger.info("Shutdown complete.")
 
     atexit.register(_shutdown)
 
-    # Start FastAPI
     uvicorn.run(
         "service.app:create_app",
         factory=True,

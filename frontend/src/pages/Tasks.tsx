@@ -10,6 +10,8 @@ export default function Tasks() {
   const [expandedTask, setExpandedTask] = useState<string | null>(null)
   const [taskDetail, setTaskDetail] = useState<{ result?: unknown; error?: string; payload?: unknown } | null>(null)
 
+  const [showQueueDetail, setShowQueueDetail] = useState(false)
+
   const page = parseInt(searchParams.get('page') || '0')
   const pageSize = parseInt(searchParams.get('size') || '20')
   const statusFilter = searchParams.get('status') || ''
@@ -93,9 +95,10 @@ export default function Tasks() {
       <h1>Task Manager</h1>
 
       <div className="stat-grid">
-        <div className="stat-card">
+        <div className="stat-card" onClick={() => setShowQueueDetail(true)} style={{ cursor: 'pointer' }}>
           <h3>Queue</h3>
           <div className="value">{stats?.queue_depth ?? '—'}</div>
+          <div style={{ fontSize: 10, color: 'var(--text-dim)', marginTop: 4 }}>click for detail</div>
         </div>
         <div className="stat-card">
           <h3>Completed</h3>
@@ -106,34 +109,31 @@ export default function Tasks() {
           <div className="value negative">{stats?.total_failed ?? 0}</div>
         </div>
         <div className="stat-card">
-          <h3>Worker State</h3>
-          <div className="value" style={{ fontSize: 16 }}>
-            {stats?.worker_state ?? 'unknown'}
+          <h3>Workers</h3>
+          <div style={{ fontSize: 12 }}>
+            {stats?.providers?.map(p => (
+              <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <span>
+                  <strong>{p.name}:</strong>{' '}
+                  <span style={{ color: p.state === 'executing' ? 'var(--green)' : p.state === 'paused' ? 'var(--yellow)' : 'var(--text-dim)' }}>
+                    {p.state ?? 'offline'}
+                  </span>
+                  {p.active_tasks > 0 && <span style={{ color: 'var(--text-dim)' }}> ({p.active_tasks}/{p.max_concurrent})</span>}
+                </span>
+                <button
+                  onClick={async (e) => {
+                    e.stopPropagation()
+                    const action = p.state === 'paused' || p.state === 'pausing' ? 'resume' : 'pause'
+                    await fetch(`/api/tasks/${action}?provider=${p.name}`, { method: 'POST' })
+                    queryClient.invalidateQueries({ queryKey: ['taskStats'] })
+                  }}
+                  style={{ fontSize: 10, padding: '1px 5px', background: p.state === 'paused' ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
+                >
+                  {p.state === 'paused' || p.state === 'pausing' ? '▶' : '⏸'}
+                </button>
+              </div>
+            )) ?? <span style={{ color: 'var(--text-dim)' }}>—</span>}
           </div>
-          {stats?.worker_state === 'pausing' && (
-            <div style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 4 }}>
-              will pause after current task
-            </div>
-          )}
-          <button
-            onClick={async () => {
-              const isPausedOrPausing = stats?.worker_state === 'paused' || stats?.worker_state === 'pausing'
-              const action = isPausedOrPausing ? 'resume' : 'pause'
-              await fetch(`/api/tasks/${action}`, { method: 'POST' })
-              queryClient.invalidateQueries({ queryKey: ['taskStats'] })
-            }}
-            style={{ marginTop: 8, fontSize: 11, background: (stats?.worker_state === 'paused' || stats?.worker_state === 'pausing') ? 'var(--green)' : 'var(--yellow)', color: 'var(--bg)' }}
-          >
-            {(stats?.worker_state === 'paused' || stats?.worker_state === 'pausing') ? 'Resume' : 'Pause'}
-          </button>
-        </div>
-        <div className="stat-card">
-          <h3>Current Model</h3>
-          <div className="value" style={{ fontSize: 14 }}>{stats?.current_model ?? 'none'}</div>
-        </div>
-        <div className="stat-card">
-          <h3>Model Switches</h3>
-          <div className="value">{stats?.model_switches ?? 0}</div>
         </div>
         <div className="stat-card">
           <h3>WebSocket</h3>
@@ -342,6 +342,41 @@ export default function Tasks() {
             </div>
           </div>
         </>
+      )}
+
+      {showQueueDetail && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowQueueDetail(false)}>
+          <div style={{ background: 'var(--surface)', borderRadius: 8, padding: 24, minWidth: 500, maxWidth: '90vw' }} onClick={e => e.stopPropagation()}>
+            <h2 style={{ marginTop: 0 }}>Queue Detail — Total: {stats?.queue_depth ?? 0}</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Provider</th>
+                  <th>State</th>
+                  <th>Queued</th>
+                  <th>Quick</th>
+                  <th>Deep</th>
+                  <th>Active</th>
+                  <th>Limit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats?.providers?.map(p => (
+                  <tr key={p.name}>
+                    <td><strong>{p.name}</strong></td>
+                    <td><span className={`badge badge-${p.state === 'executing' ? 'running' : p.state === 'idle' ? 'completed' : p.state ?? 'unknown'}`}>{p.state ?? 'offline'}</span></td>
+                    <td>{p.queue_depth}</td>
+                    <td>{p.quick_queued}</td>
+                    <td>{p.deep_queued}</td>
+                    <td>{p.active_tasks}/{p.max_concurrent}</td>
+                    <td>{p.max_queue < 0 ? '∞' : p.max_queue}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <button onClick={() => setShowQueueDetail(false)} style={{ marginTop: 16 }}>Close</button>
+          </div>
+        </div>
       )}
     </div>
   )

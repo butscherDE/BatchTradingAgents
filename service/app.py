@@ -150,9 +150,10 @@ async def lifespan(app: FastAPI):
     await _recover_orphaned_tasks()
 
     # Redis / GPU scheduler
-    _scheduler = GpuScheduler(_config.redis_url)
+    _scheduler = GpuScheduler(_config.redis_url, _config.providers)
     try:
         await _scheduler.connect()
+        await _scheduler.migrate_legacy_queue()
         await _scheduler.flush_queues()
 
         # Start result listener FIRST — before resubmitting tasks,

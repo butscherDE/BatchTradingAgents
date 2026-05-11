@@ -176,7 +176,7 @@ async def _replay(since: str):
         await session.commit()
 
     # Submit to GPU queue via Redis
-    scheduler = GpuScheduler(config.redis_url)
+    scheduler = GpuScheduler(config.redis_url, config.providers)
     await scheduler.connect()
 
     submitted = 0

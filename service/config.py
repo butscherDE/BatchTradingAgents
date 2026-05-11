@@ -6,6 +6,17 @@ from pydantic_settings import BaseSettings
 from pyhocon import ConfigFactory
 
 
+class ProviderConfig(BaseSettings):
+    type: str = "ollama"
+    url: str = "http://localhost:11434"
+    api_key: str = ""
+    quick_model: str = "qwen3:8b"
+    deep_model: str = "qwen3:32b"
+    priority: int = 1
+    max_queue: int = -1
+    max_concurrent: int = 1
+
+
 class GpuConfig(BaseSettings):
     quick_model: str = "qwen3:8b"
     deep_model: str = "qwen3:32b"
@@ -57,6 +68,7 @@ class ServiceConfig(BaseSettings):
     watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     polling: PollingConfig = Field(default_factory=PollingConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
+    providers: dict[str, ProviderConfig] = Field(default_factory=dict)
     news_symbols: list[str] = Field(default_factory=lambda: ["*"])
 
 
@@ -80,6 +92,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     watchlist_raw = raw.get("watchlist", {})
     polling_raw = raw.get("polling", {})
     auth_raw = raw.get("auth", {})
+    providers_raw = raw.get("providers", {})
 
     accounts = {}
     for name, acct in accounts_raw.items():
@@ -92,6 +105,31 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             dynamic_discovery=acct.get("dynamic_discovery", False),
             auto_prune=acct.get("auto_prune", False),
         )
+
+    providers = {}
+    for name, prov in providers_raw.items():
+        providers[name] = ProviderConfig(
+            type=prov.get("type", "ollama"),
+            url=prov.get("url", "http://localhost:11434"),
+            api_key=prov.get("api_key", ""),
+            quick_model=prov.get("quick_model", "qwen3:8b"),
+            deep_model=prov.get("deep_model", "qwen3:32b"),
+            priority=prov.get("priority", 1),
+            max_queue=prov.get("max_queue", -1),
+            max_concurrent=prov.get("max_concurrent", 1),
+        )
+
+    # Backward compat: if no providers defined, synthesize from gpu.* block
+    if not providers:
+        providers = {"local": ProviderConfig(
+            type="ollama",
+            url=gpu_raw.get("ollama_url", "http://localhost:11434"),
+            quick_model=gpu_raw.get("quick_model", "qwen3:8b"),
+            deep_model=gpu_raw.get("deep_model", "qwen3:32b"),
+            priority=1,
+            max_queue=-1,
+            max_concurrent=1,
+        )}
 
     return ServiceConfig(
         host=service_raw.get("host", "0.0.0.0"),
@@ -110,6 +148,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
         ),
         polling=PollingConfig(**polling_raw),
         accounts=accounts,
+        providers=providers,
         news_symbols=streams_raw.get("news_symbols", ["*"]),
     )
 

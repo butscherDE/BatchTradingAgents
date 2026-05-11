@@ -35,6 +35,18 @@ class TaskResponse(BaseModel):
     error: Optional[str] = None
 
 
+class ProviderStatus(BaseModel):
+    name: str
+    state: Optional[str] = None
+    queue_depth: int = 0
+    quick_queued: int = 0
+    deep_queued: int = 0
+    active_tasks: int = 0
+    max_concurrent: int = 1
+    max_queue: int = -1
+    current_model: Optional[str] = None
+
+
 class TaskStats(BaseModel):
     queue_depth: int = 0
     total_completed: int = 0
@@ -43,6 +55,7 @@ class TaskStats(BaseModel):
     worker_state: Optional[str] = None
     model_switches: int = 0
     tasks_per_minute: float = 0.0
+    providers: list[ProviderStatus] = []
 
 
 class HealthResponse(BaseModel):

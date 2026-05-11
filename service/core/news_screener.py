@@ -1,6 +1,7 @@
-"""Quick and deep news screening via Ollama LLM calls."""
+"""Quick and deep news screening via LLM calls."""
 
 import json
+from typing import Callable
 
 import requests
 
@@ -9,8 +10,9 @@ def screen_news_quick(
     headline: str,
     summary: str,
     symbols: list[str],
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Quick screening: is this news worth investigating further?"""
     num_symbols = len(symbols)
@@ -35,7 +37,7 @@ Rate the relevance on a scale of 0.0 to 1.0:
 Respond in this exact JSON format:
 {{"score": <float>, "reasoning": "<one sentence>", "affected_ticker": "<most affected symbol or null>"}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
 
 
@@ -45,8 +47,9 @@ def investigate_deep(
     symbols: list[str],
     ticker: str,
     current_thesis: str,
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Deep investigation: does this news break the current thesis?"""
     thesis_section = ""
@@ -80,15 +83,16 @@ If no current thesis exists, set should_regenerate_report to true for any materi
 Respond in this exact JSON format:
 {{"verdict": "material_change|thesis_confirmation|noise", "direction": "buy|hold|sell|null", "reasoning": "<2-3 sentences explaining your assessment>", "should_regenerate_report": true|false}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
 
 
 def consolidate_news(
     ticker: str,
     articles: list[dict],
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Consolidate multiple articles into distinct events, preserving all information."""
     articles_text = "\n".join(
@@ -117,8 +121,14 @@ that combines all key facts from the grouped articles.
 Respond in this exact JSON format:
 {{"events": [{{"headline": "...", "summary": "...", "article_ids": [1, 2, 3]}}]}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
+
+
+def _invoke(llm_call: Callable[[str], str] | None, ollama_url: str, model: str, prompt: str) -> str:
+    if llm_call:
+        return llm_call(prompt)
+    return _call_ollama(ollama_url, model, prompt)
 
 
 def _call_ollama(ollama_url: str, model: str, prompt: str) -> str:
@@ -153,8 +163,9 @@ def evaluate_watchlist_addition(
     strategy: str,
     strategy_instruction: str,
     num_symbols: int,
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Quick model: should this unwatched ticker be added to the watchlist? Strategy-aware."""
     prompt = f"""You are a watchlist curator for a **{strategy}** trading portfolio.
@@ -187,7 +198,7 @@ Do NOT add if:
 Respond in JSON:
 {{"add": true|false, "reasoning": "<one sentence>"}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
 
 
@@ -196,8 +207,9 @@ def evaluate_watchlist_prune(
     strategy: str,
     strategy_instruction: str,
     recent_headlines: list[str],
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Quick model: should this ticker be removed from the watchlist? Strategy-aware."""
     headlines_str = "\n".join(f"  - {h}" for h in recent_headlines) if recent_headlines else "(no recent news)"
@@ -228,7 +240,7 @@ Answer YES, MAYBE, or NO with one sentence of reasoning.
 Respond in JSON:
 {{"remove": "yes"|"maybe"|"no", "reasoning": "<one sentence>"}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
 
 
@@ -238,8 +250,9 @@ def confirm_watchlist_prune(
     strategy_instruction: str,
     recent_headlines: list[str],
     quick_reasoning: str,
-    ollama_url: str,
-    model: str,
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
 ) -> dict:
     """Deep model: confirm whether to prune a ticker (called when quick model didn't say 'no')."""
     headlines_str = "\n".join(f"  - {h}" for h in recent_headlines) if recent_headlines else "(no recent news)"
@@ -263,5 +276,5 @@ Perform a thorough evaluation:
 Respond in JSON:
 {{"remove": true|false, "reasoning": "<2-3 sentences>"}}"""
 
-    response = _call_ollama(ollama_url, model, prompt)
+    response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)

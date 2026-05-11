@@ -7,7 +7,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from service.db.models import GpuTask, TaskStatus
-from service.models.schemas import TaskResponse, TaskStats
+from service.models.schemas import TaskResponse, TaskStats, ProviderStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -68,7 +68,7 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
     scheduler = get_scheduler()
     depths = await scheduler.get_queue_depths()
     worker_status = await scheduler.get_worker_status()
-    paused = await scheduler.is_paused()
+    provider_detail = await scheduler.get_provider_queue_detail()
 
     completed = await session.execute(
         select(func.count()).where(GpuTask.status == TaskStatus.completed)
@@ -78,10 +78,6 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
     )
 
     worker_state = worker_status.get("state") if worker_status else None
-    if paused and worker_state in ("executing", "switching_model"):
-        worker_state = "pausing"
-    elif paused:
-        worker_state = "paused"
 
     return TaskStats(
         queue_depth=depths.get("total", 0),
@@ -90,23 +86,43 @@ async def get_task_stats(session: AsyncSession = Depends(get_session)):
         current_model=worker_status.get("current_model") if worker_status else None,
         worker_state=worker_state,
         model_switches=worker_status.get("model_switches", 0) if worker_status else 0,
+        providers=[
+            ProviderStatus(
+                name=p["name"],
+                state=p["state"],
+                queue_depth=p["depth"],
+                quick_queued=p["quick_count"],
+                deep_queued=p["deep_count"],
+                active_tasks=p["active_tasks"],
+                max_concurrent=p["max_concurrent"],
+                max_queue=p["max_queue"],
+                current_model=p.get("current_model"),
+            )
+            for p in provider_detail
+        ],
     )
 
 
 @router.post("/pause")
-async def pause_worker():
+async def pause_worker(provider: Optional[str] = Query(default=None)):
     from service.app import get_scheduler
     scheduler = get_scheduler()
-    await scheduler.pause()
-    return {"paused": True}
+    if provider:
+        await scheduler.pause_provider(provider)
+    else:
+        await scheduler.pause()
+    return {"paused": True, "provider": provider or "all"}
 
 
 @router.post("/resume")
-async def resume_worker():
+async def resume_worker(provider: Optional[str] = Query(default=None)):
     from service.app import get_scheduler
     scheduler = get_scheduler()
-    await scheduler.resume()
-    return {"paused": False}
+    if provider:
+        await scheduler.resume_provider(provider)
+    else:
+        await scheduler.resume()
+    return {"paused": False, "provider": provider or "all"}
 
 
 @router.get("/{task_id}")
