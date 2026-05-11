@@ -37,9 +37,10 @@ class RemoteWorker:
         self._redis = aioredis.from_url(self.config.redis_url, decode_responses=True)
         await self._publish_status("starting", "Worker starting up")
 
-        loop = asyncio.get_event_loop()
-        loop.add_signal_handler(signal.SIGTERM, self._handle_shutdown)
-        loop.add_signal_handler(signal.SIGINT, self._handle_shutdown)
+        if sys.platform != "win32":
+            loop = asyncio.get_event_loop()
+            loop.add_signal_handler(signal.SIGTERM, self._handle_shutdown)
+            loop.add_signal_handler(signal.SIGINT, self._handle_shutdown)
 
         while self._running:
             paused = await self._redis.get(self._paused_key)
