@@ -224,6 +224,7 @@ async def trigger_merge_allocate(
     account_id: str = Query(...),
     merge_checks: Optional[int] = Query(default=None, description="Override merge validation passes"),
     allocation_checks: Optional[int] = Query(default=None, description="Override allocation validation passes"),
+    provider: Optional[str] = Query(default=None, description="Force routing to a specific provider"),
     session: AsyncSession = Depends(get_session),
 ):
     """Manually trigger a merge+allocate for an account using latest reports on disk."""
@@ -293,7 +294,7 @@ async def trigger_merge_allocate(
             "merge_checks_override": merge_checks,
             "allocation_checks_override": allocation_checks,
         },
-    ))
+    ), provider=provider)
 
     db_task = GpuTask(
         task_id=task_id,

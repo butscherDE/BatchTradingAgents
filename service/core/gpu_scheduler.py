@@ -45,7 +45,7 @@ class GpuScheduler:
         if self._redis:
             await self._redis.close()
 
-    async def submit(self, spec: TaskSpec, task_id: Optional[str] = None) -> str:
+    async def submit(self, spec: TaskSpec, task_id: Optional[str] = None, provider: Optional[str] = None) -> str:
         if task_id is None:
             task_id = str(uuid.uuid4())
         task_data = {
@@ -58,7 +58,16 @@ class GpuScheduler:
             "created_at": datetime.datetime.utcnow().isoformat(),
         }
 
-        provider_name = await self._router.route(task_data)
+        if provider and provider in self._providers:
+            queue_key = f"gpu:provider:{provider}:queue"
+            if spec.priority == 0:
+                await self._redis.lpush(queue_key, json.dumps(task_data))
+            else:
+                await self._redis.rpush(queue_key, json.dumps(task_data))
+            provider_name = provider
+        else:
+            provider_name = await self._router.route(task_data)
+
         task_data["routed_to"] = provider_name
         self._last_routed_to = provider_name
         return task_id
