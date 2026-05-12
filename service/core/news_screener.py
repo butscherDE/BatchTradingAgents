@@ -315,6 +315,7 @@ def rank_and_prune_watchlist(
     # Score tickers in batches
     BATCH_SIZE = 30
     scored = []
+    failed_batches = 0
 
     for i in range(0, len(tickers_with_context), BATCH_SIZE):
         batch = tickers_with_context[i:i + BATCH_SIZE]
@@ -323,12 +324,18 @@ def rank_and_prune_watchlist(
                 batch, strategy, strategy_instruction, held_symbols,
                 ollama_url, model, llm_call,
             )
-        except Exception:
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).error(f"Batch {i//BATCH_SIZE + 1} scoring failed: {type(e).__name__}: {e}")
+            failed_batches += 1
             batch_scores = [
                 {"symbol": t["symbol"], "score": 5, "reasoning": "batch scoring failed"}
                 for t in batch
             ]
         scored.extend(batch_scores)
+
+    if failed_batches == (len(tickers_with_context) + BATCH_SIZE - 1) // BATCH_SIZE:
+        raise RuntimeError(f"All {failed_batches} batches failed — cannot score tickers")
 
     # Held symbols get max score (cannot be removed)
     for item in scored:
