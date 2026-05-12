@@ -264,7 +264,7 @@ class OllamaWorker:
         from cli.position_risk import STRATEGY_THRESHOLDS
         strategy = payload.get("strategy", "balanced")
         thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
-        model = self.provider_config.quick_model
+        model = self.provider_config.deep_model
         return rank_and_prune_watchlist(
             tickers_with_context=payload["tickers"],
             max_tickers=payload["max_tickers"],

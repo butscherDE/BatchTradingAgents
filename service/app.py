@@ -1245,7 +1245,7 @@ async def _run_prune_for_account(account_name: str, acct):
     }
 
     task_id = await _scheduler.submit(TaskSpec(
-        model_tier="quick",
+        model_tier="deep",
         task_type="watchlist_rank_prune",
         payload=payload,
         ticker=None,
@@ -1254,7 +1254,7 @@ async def _run_prune_for_account(account_name: str, acct):
     async with get_db_session() as session:
         db_task = GpuTask(
             task_id=task_id,
-            model_tier="quick",
+            model_tier="deep",
             task_type="watchlist_rank_prune",
             ticker=None,
             priority=2,
