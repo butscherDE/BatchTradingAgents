@@ -297,7 +297,7 @@ def rank_and_prune_watchlist(
     model: str = "",
     llm_call: Callable[[str], str] | None = None,
 ) -> dict:
-    """Rank all watchlist tickers and decide which to remove to fit under max_tickers.
+    """Score all watchlist tickers in batches, then keep the top max_tickers.
 
     tickers_with_context: list of {"symbol": str, "added_by": str, "recent_headlines": list[str]}
     Returns: {"keep": [...], "remove": [{"symbol": ..., "reasoning": ...}], "ranking_reasoning": str}
@@ -305,38 +305,106 @@ def rank_and_prune_watchlist(
     current_count = len(tickers_with_context)
     need_to_remove = max(0, current_count - max_tickers)
 
+    if need_to_remove == 0:
+        return {
+            "keep": [t["symbol"] for t in tickers_with_context],
+            "remove": [],
+            "ranking_reasoning": "Watchlist is within limit, no pruning needed.",
+        }
+
+    # Score tickers in batches
+    BATCH_SIZE = 30
+    scored = []
+
+    for i in range(0, len(tickers_with_context), BATCH_SIZE):
+        batch = tickers_with_context[i:i + BATCH_SIZE]
+        batch_scores = _score_ticker_batch(
+            batch, strategy, strategy_instruction, held_symbols,
+            ollama_url, model, llm_call,
+        )
+        scored.extend(batch_scores)
+
+    # Held symbols get max score (cannot be removed)
+    for item in scored:
+        if item["symbol"] in held_symbols:
+            item["score"] = 100
+
+    # Sort by score descending, keep top max_tickers
+    scored.sort(key=lambda x: x["score"], reverse=True)
+
+    keep = [s["symbol"] for s in scored[:max_tickers]]
+    remove = [
+        {"symbol": s["symbol"], "reasoning": s.get("reasoning", "lowest ranked")}
+        for s in scored[max_tickers:]
+    ]
+
+    return {
+        "keep": keep,
+        "remove": remove,
+        "ranking_reasoning": f"Scored {len(scored)} tickers in {(len(tickers_with_context) + BATCH_SIZE - 1) // BATCH_SIZE} batches, keeping top {max_tickers}.",
+    }
+
+
+def _score_ticker_batch(
+    batch: list[dict],
+    strategy: str,
+    strategy_instruction: str,
+    held_symbols: list[str],
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
+) -> list[dict]:
+    """Score a batch of tickers (0-10) for watchlist fitness."""
     ticker_lines = []
-    for t in tickers_with_context:
+    for t in batch:
         headlines = t.get("recent_headlines", [])
-        headlines_str = "; ".join(headlines[:5]) if headlines else "(no recent news)"
-        held_marker = " [HELD - cannot remove]" if t["symbol"] in held_symbols else ""
-        ticker_lines.append(f"  - {t['symbol']}{held_marker} (added by: {t['added_by']}): {headlines_str}")
+        headlines_str = "; ".join(headlines[:3]) if headlines else "(no recent news)"
+        ticker_lines.append(f"  - {t['symbol']} (added by: {t['added_by']}): {headlines_str}")
     tickers_str = "\n".join(ticker_lines)
 
-    held_str = ", ".join(held_symbols) if held_symbols else "(none)"
+    symbols_list = ", ".join(t["symbol"] for t in batch)
 
-    prompt = f"""You are a portfolio watchlist manager for a **{strategy}** portfolio.
+    prompt = f"""You are a watchlist curator for a **{strategy}** portfolio.
 
 **Strategy description:** {strategy_instruction}
 
-**Current watchlist ({current_count} tickers, limit is {max_tickers}):**
+Score each ticker below from 0 to 10 based on how well it fits the {strategy} watchlist RIGHT NOW.
+
+**Scoring criteria:**
+- 8-10: Active catalyst, strong thesis, fits strategy perfectly
+- 5-7: Decent fit, some upcoming catalyst or developing story
+- 2-4: Weak fit, thesis played out, no near-term catalyst
+- 0-1: No reason to monitor, doesn't fit strategy at all
+
+**Tickers to score:**
 {tickers_str}
 
-**Currently held positions (CANNOT be removed):** {held_str}
-**Need to remove:** {need_to_remove} ticker(s) to reach the limit of {max_tickers}
+Respond with ONLY a JSON object mapping each symbol to its score and a brief reason:
+{{"scores": [{{"symbol": "SYM", "score": N, "reasoning": "one sentence"}}]}}
 
-**Instructions:**
-Rank all tickers by their fit for the {strategy} strategy. Consider:
-1. Strength of current thesis / catalyst pipeline
-2. Recency and materiality of news flow
-3. Fit with the {strategy} risk profile
-4. Whether the story is still developing or has played out
-
-Then select exactly {need_to_remove} ticker(s) to REMOVE (lowest-ranked that are not held positions).
-If a ticker is marked [HELD], you CANNOT remove it regardless of ranking.
-
-Respond in this exact JSON format:
-{{"keep": ["SYM1", "SYM2", ...], "remove": [{{"symbol": "SYM", "reasoning": "one sentence"}}], "ranking_reasoning": "brief explanation of ranking logic"}}"""
+Symbols to include: {symbols_list}"""
 
     response = _invoke(llm_call, ollama_url, model, prompt)
-    return _parse_json_response(response, default_score=0.0)
+    parsed = _parse_json_response(response, default_score=0.0)
+
+    # Extract scores from response
+    results = []
+    if "scores" in parsed:
+        score_map = {s["symbol"]: s for s in parsed["scores"]}
+        for t in batch:
+            entry = score_map.get(t["symbol"], {})
+            results.append({
+                "symbol": t["symbol"],
+                "score": entry.get("score", 5),
+                "reasoning": entry.get("reasoning", ""),
+            })
+    else:
+        # Fallback: give all tickers default score
+        for t in batch:
+            results.append({
+                "symbol": t["symbol"],
+                "score": 5,
+                "reasoning": "scoring failed for batch",
+            })
+
+    return results
