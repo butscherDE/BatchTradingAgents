@@ -133,7 +133,7 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
     )
 
 
-@router.post("/prune")
+@router.post("/actions/prune")
 async def trigger_prune(
     account_id: str = Query(...),
 ):

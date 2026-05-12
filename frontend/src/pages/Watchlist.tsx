@@ -95,7 +95,7 @@ export default function Watchlist() {
 
   const pruneMutation = useMutation({
     mutationFn: () =>
-      fetch(`/api/watchlist/prune?account_id=${accountId}`, { method: 'POST' }).then(async r => {
+      fetch(`/api/watchlist/actions/prune?account_id=${accountId}`, { method: 'POST' }).then(async r => {
         if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
         return r.json()
       }),
