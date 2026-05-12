@@ -258,26 +258,6 @@ export default function Proposals() {
             </div>
           )}
 
-          {detail.ticker_data.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>PER-TICKER DECISIONS</h3>
-              <table>
-                <thead>
-                  <tr><th>Ticker</th><th>Decision</th><th>Reasoning</th></tr>
-                </thead>
-                <tbody>
-                  {detail.ticker_data.map(t => (
-                    <tr key={t.ticker}>
-                      <td style={{ fontWeight: 600 }}>{t.ticker}</td>
-                      <td>{t.decision}</td>
-                      <td style={{ fontSize: 12, maxWidth: 400 }}>{t.reasoning.slice(0, 200)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
           {detail.allocation && detail.allocation.length > 0 && (
             <div style={{ marginBottom: 16 }}>
               <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>ALLOCATION PLAN</h3>
@@ -369,6 +349,26 @@ export default function Proposals() {
                       <td style={{ fontSize: 11 }}>{r.order_id ?? '—'}</td>
                       <td>{r.status ?? '—'}</td>
                       <td className="negative">{r.error ?? ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {detail.ticker_data.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 6 }}>PER-TICKER DECISIONS</h3>
+              <table>
+                <thead>
+                  <tr><th>Ticker</th><th>Decision</th><th>Reasoning</th></tr>
+                </thead>
+                <tbody>
+                  {detail.ticker_data.map(t => (
+                    <tr key={t.ticker}>
+                      <td style={{ fontWeight: 600 }}>{t.ticker}</td>
+                      <td>{t.decision}</td>
+                      <td style={{ fontSize: 12, maxWidth: 400 }}>{t.reasoning.slice(0, 200)}</td>
                     </tr>
                   ))}
                 </tbody>

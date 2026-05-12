@@ -93,6 +93,18 @@ export default function Watchlist() {
     },
   })
 
+  const pruneMutation = useMutation({
+    mutationFn: () =>
+      fetch(`/api/watchlist/prune?account_id=${accountId}`, { method: 'POST' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
+        return r.json()
+      }),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      alert(`Prune submitted for ${accountId} (limit: ${data.max_watchlist})`)
+    },
+  })
+
   const analyzeSelected = () => {
     if (selected.size === 0) return
     const symbols = Array.from(selected)
@@ -174,11 +186,23 @@ export default function Watchlist() {
         >
           {analyzeMutation.isPending ? 'Submitting...' : `Analyze All (${activeCount})`}
         </button>
+        <button
+          onClick={() => pruneMutation.mutate()}
+          disabled={pruneMutation.isPending || !accountId}
+          style={{ background: 'var(--yellow)', color: 'var(--bg)' }}
+        >
+          {pruneMutation.isPending ? 'Submitting...' : 'Prune'}
+        </button>
       </div>
 
       {addMutation.isError && (
         <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 13 }}>
           {(addMutation.error as Error).message}
+        </p>
+      )}
+      {pruneMutation.isError && (
+        <p style={{ color: 'var(--red)', marginBottom: 12, fontSize: 13 }}>
+          {(pruneMutation.error as Error).message}
         </p>
       )}
 
