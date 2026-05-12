@@ -55,6 +55,7 @@ class MetricsConfig(BaseSettings):
 
 
 class AccountConfig(BaseSettings):
+    brokerage: str = "alpaca"
     api_key: str = ""
     api_secret: str = ""
     is_paper: bool = True
@@ -63,6 +64,10 @@ class AccountConfig(BaseSettings):
     dynamic_discovery: bool = False
     auto_prune: bool = False
     max_watchlist: int = 20
+    # E*TRADE specific
+    oauth_token: str = ""
+    oauth_token_secret: str = ""
+    etrade_account_id_key: str = ""
 
 
 class ServiceConfig(BaseSettings):
@@ -108,6 +113,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     accounts = {}
     for name, acct in accounts_raw.items():
         accounts[name] = AccountConfig(
+            brokerage=acct.get("brokerage", "alpaca"),
             api_key=acct.get("api_key", ""),
             api_secret=acct.get("api_secret", ""),
             is_paper=acct.get("is_paper", True),
@@ -116,6 +122,9 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             dynamic_discovery=acct.get("dynamic_discovery", False),
             auto_prune=acct.get("auto_prune", False),
             max_watchlist=acct.get("max_watchlist", 20),
+            oauth_token=acct.get("oauth_token", ""),
+            oauth_token_secret=acct.get("oauth_token_secret", ""),
+            etrade_account_id_key=acct.get("etrade_account_id_key", ""),
         )
 
     providers = {}

@@ -72,17 +72,19 @@ async def _fetch_account_summary(name: str, acct) -> AccountSummary:
 
 
 def _fetch_summary_sync(name: str, acct) -> AccountSummary:
-    from alpaca.trading.client import TradingClient
+    from cli.broker import create_broker_from_config
 
     try:
-        client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
-        account = client.get_account()
+        client = create_broker_from_config(acct)
+        positions = client.get_positions()
+        cash = client.get_account_cash()
 
-        portfolio_value = float(account.portfolio_value or 0)
-        cash = float(account.cash or 0)
-        last_equity = float(account.last_equity or portfolio_value)
-        day_pl = portfolio_value - last_equity
-        day_pl_pct = (day_pl / last_equity * 100) if last_equity > 0 else 0.0
+        portfolio_value = cash + sum(
+            (p.current_price or 0) * p.qty for p in positions
+        )
+        # No day P/L available generically — compute from positions
+        day_pl = 0.0
+        day_pl_pct = 0.0
 
         return AccountSummary(
             id=name,
@@ -110,17 +112,17 @@ def _fetch_summary_sync(name: str, acct) -> AccountSummary:
 
 
 def _fetch_holdings_sync(name: str, acct) -> tuple[AccountSummary, list[HoldingResponse]]:
-    from alpaca.trading.client import TradingClient
+    from cli.broker import create_broker_from_config
 
-    client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
-    account = client.get_account()
-    positions = client.get_all_positions()
+    client = create_broker_from_config(acct)
+    positions = client.get_positions()
+    cash = client.get_account_cash()
 
-    portfolio_value = float(account.portfolio_value or 0)
-    cash = float(account.cash or 0)
-    last_equity = float(account.last_equity or portfolio_value)
-    day_pl_total = portfolio_value - last_equity
-    day_pl_pct_total = (day_pl_total / last_equity * 100) if last_equity > 0 else 0.0
+    portfolio_value = cash + sum(
+        (p.current_price or 0) * p.qty for p in positions
+    )
+    day_pl_total = 0.0
+    day_pl_pct_total = 0.0
 
     summary = AccountSummary(
         id=name,
@@ -136,18 +138,14 @@ def _fetch_holdings_sync(name: str, acct) -> tuple[AccountSummary, list[HoldingR
 
     holdings = []
     for pos in positions:
-        qty = float(pos.qty)
-        entry = float(pos.avg_entry_price) if pos.avg_entry_price else 0
-        current = float(pos.current_price) if pos.current_price else 0
-        market_value = float(pos.market_value) if pos.market_value else qty * current
-        unrealized_pl = float(pos.unrealized_pl) if pos.unrealized_pl else (current - entry) * qty
-        unrealized_plpc = float(pos.unrealized_plpc) if pos.unrealized_plpc else (
-            ((current - entry) / entry * 100) if entry > 0 else 0
+        qty = pos.qty
+        entry = pos.avg_entry_price or 0
+        current = pos.current_price or 0
+        market_value = qty * current
+        unrealized_pl = pos.unrealized_pl if pos.unrealized_pl is not None else (current - entry) * qty
+        unrealized_plpc = pos.unrealized_plpc if pos.unrealized_plpc is not None else (
+            ((current - entry) / entry) if entry > 0 else 0
         )
-
-        change_today = float(pos.change_today) if hasattr(pos, "change_today") and pos.change_today else 0
-        day_pl = market_value * change_today if change_today else 0
-        day_pl_pct = change_today * 100 if change_today else 0
 
         pct_of_portfolio = (market_value / portfolio_value * 100) if portfolio_value > 0 else 0
 
@@ -158,8 +156,8 @@ def _fetch_holdings_sync(name: str, acct) -> tuple[AccountSummary, list[HoldingR
             current_price=current,
             total_pl=unrealized_pl,
             total_pl_pct=unrealized_plpc * 100 if abs(unrealized_plpc) < 1 else unrealized_plpc,
-            day_pl=day_pl,
-            day_pl_pct=day_pl_pct,
+            day_pl=0,
+            day_pl_pct=0,
             market_value=market_value,
             portfolio_pct=pct_of_portfolio,
         ))

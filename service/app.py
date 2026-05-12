@@ -1025,6 +1025,10 @@ def _execute_emergency_sell(acct, ticker: str, reason: str) -> dict | None:
         ticker=ticker,
         sell_fraction=sell_fraction,
         reason=reason,
+        brokerage=acct.brokerage,
+        oauth_token=acct.oauth_token,
+        oauth_token_secret=acct.oauth_token_secret,
+        etrade_account_id_key=acct.etrade_account_id_key,
     )
 
 
@@ -1201,15 +1205,10 @@ async def _run_prune_for_account(account_name: str, acct):
     # Get held positions (cannot be pruned)
     held_symbols = set()
     try:
-        from alpaca.trading.client import TradingClient
-        client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
-        positions = client.get_all_positions()
+        from cli.broker import create_broker_from_config
+        client = create_broker_from_config(acct)
+        positions = client.get_positions()
         held_symbols = {p.symbol for p in positions}
-
-        from alpaca.trading.requests import GetOrdersRequest
-        from alpaca.trading.enums import QueryOrderStatus
-        open_orders = client.get_orders(filter=GetOrdersRequest(status=QueryOrderStatus.OPEN))
-        held_symbols.update(o.symbol for o in open_orders)
     except Exception:
         pass
 
