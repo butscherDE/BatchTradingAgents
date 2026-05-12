@@ -2,16 +2,16 @@
 
 ## Remote Server (Windows)
 
-The continuous evaluation service runs on a Windows machine at `10.0.0.217`.
+The continuous evaluation service runs on a Windows machine at `10.0.0.15`.
 
 **SSH access:**
 ```
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15
 ```
 
 **REST API (direct from this machine):**
 ```
-http://10.0.0.217:8000
+http://10.0.0.15:8000
 ```
 
 **Key endpoints:**
@@ -30,11 +30,11 @@ http://10.0.0.217:8000
 - `POST /api/proposals/{id}/approve` — execute proposed trades
 - `POST /api/proposals/{id}/reject` — reject proposal
 - `GET /api/watchlist/search?q=...` — ticker autocomplete search
-- Full Swagger docs at `http://10.0.0.217:8000/docs`
+- Full Swagger docs at `http://10.0.0.15:8000/docs`
 
 **Run remote commands via SSH:**
 ```
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "command here"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "command here"
 ```
 
 **Notes:**
@@ -49,27 +49,27 @@ ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "command here"
 **Common operations:**
 ```bash
 # Check service logs
-curl -s "http://10.0.0.217:8000/api/logs?limit=20" | python3 -m json.tool
+curl -s "http://10.0.0.15:8000/api/logs?limit=20" | python3 -m json.tool
 
 # Check task stats
-curl -s "http://10.0.0.217:8000/api/tasks/stats" | python3 -m json.tool
+curl -s "http://10.0.0.15:8000/api/tasks/stats" | python3 -m json.tool
 
 # Pull latest code on server
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && git pull"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "cd C:\Users\danie\repos\BatchTradingAgents && git pull"
 
 # Restart service (stop + start)
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "taskkill /F /IM python.exe & cd C:\Users\danie\repos\BatchTradingAgents && start /B python -m service.main"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "taskkill /F /IM python.exe & cd C:\Users\danie\repos\BatchTradingAgents && start /B python -m service.main"
 
 # Backfill news from yfinance (pulls latest news for all watchlist tickers into DB)
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill"
 
 # Backfill with date filter (only news after a specific date)
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill --since 2026-05-07"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools backfill --since 2026-05-07"
 
 # Replay articles through GPU pipeline (resubmits queued articles to GPU worker)
 # Requires service to be running
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools replay --since 2026-05-08T00:00:00"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "cd C:\Users\danie\repos\BatchTradingAgents && python -m service.tools replay --since 2026-05-08T00:00:00"
 
 # Delete DB and start fresh (stop service first)
-ssh -i ~/.ssh/key_butschpc danie@10.0.0.217 "cd C:\Users\danie\repos\BatchTradingAgents && del data\service.db"
+ssh -i ~/.ssh/key_butschpc danie@10.0.0.15 "cd C:\Users\danie\repos\BatchTradingAgents && del data\service.db"
 ```

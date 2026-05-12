@@ -70,7 +70,7 @@ class TradingAgentsConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
-                vol.Required(CONF_HOST, default="10.0.0.217"): str,
+                vol.Required(CONF_HOST, default="10.0.0.15"): str,
                 vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
                 vol.Optional(CONF_PASSWORD, default=""): str,
             }),
