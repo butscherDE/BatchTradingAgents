@@ -12,6 +12,12 @@ STRATEGY_THRESHOLDS = {
             "the analyst case presents an imminent, specific recovery catalyst with a clear timeline. "
             "Positions with >25% drawdown are critical: recommend exit regardless of analyst outlook."
         ),
+        "discovery_instruction": (
+            "Only add large-cap, blue-chip stocks with strong balance sheets and proven earnings. "
+            "Requires a clear, low-risk catalyst: dividend increase, buyback announcement, "
+            "or earnings beat on a stable business. Reject speculative small-caps, biotechs, "
+            "crypto, SPACs, and anything with negative earnings."
+        ),
     },
     "balanced": {
         "warning_pct": 20,
@@ -23,6 +29,12 @@ STRATEGY_THRESHOLDS = {
             "the analyst report explicitly justifies holding through with a strong thesis. "
             "Positions with >35% drawdown are critical: strongly recommend exit."
         ),
+        "discovery_instruction": (
+            "Add mid-to-large cap stocks with clear catalysts: earnings beats, guidance raises, "
+            "M&A activity, major contract wins. Both growth and value names are acceptable if "
+            "the catalyst is specific and near-term. Reject listicles, generic sector commentary, "
+            "and penny stocks under $5."
+        ),
     },
     "aggressive": {
         "warning_pct": 35,
@@ -33,6 +45,12 @@ STRATEGY_THRESHOLDS = {
             "Drawdowns below 35% are acceptable volatility for this strategy. "
             "Only flag as a sell signal if the drawdown exceeds 35% AND the underlying thesis "
             "appears broken (not just price action). Drawdowns >50% warrant exit review."
+        ),
+        "discovery_instruction": (
+            "Add growth stocks and momentum plays with specific catalysts: earnings surprises, "
+            "product launches, regulatory approvals, insider buying on dips. Small-caps are fine "
+            "if the catalyst is concrete. Reject consumer staples, utilities, and low-volatility "
+            "defensive names — they don't fit this risk profile."
         ),
     },
     "yolo": {
@@ -46,6 +64,15 @@ STRATEGY_THRESHOLDS = {
             "fundamentally collapsed (regulatory rejection, failed trial, fraud, etc.), "
             "not merely because the price is down."
         ),
+        "discovery_instruction": (
+            "Add high-beta, asymmetric payoff opportunities: pre-catalyst biotechs, "
+            "high-short-interest squeezes, earnings beats >20% on small/mid caps, "
+            "binary event plays (FDA decisions, merger votes, crypto protocol upgrades). "
+            "Do NOT add large-cap defensive stocks, consumer staples, packaged food companies, "
+            "utilities, or mature dividend payers. An EPS beat of >20% on a small-cap IS a valid "
+            "catalyst. Community debates and governance discussions are NOT catalysts — require "
+            "concrete events with clear price impact timelines."
+        ),
     },
     "mean": {
         "warning_pct": 30,
@@ -58,6 +85,12 @@ STRATEGY_THRESHOLDS = {
             "review whether the regulatory or geopolitical catalyst is still intact. "
             "Exit at >45% only if the policy environment has reversed (e.g., defense cuts, "
             "re-regulation, international de-escalation)."
+        ),
+        "discovery_instruction": (
+            "Add stocks that benefit from specific macro policy tailwinds: defense contractors, "
+            "fossil fuel producers, deregulation beneficiaries, infrastructure plays. "
+            "The catalyst must be a concrete policy event (contract award, regulatory ruling, "
+            "executive order, tariff change). Reject stocks without clear policy exposure."
         ),
     },
 }

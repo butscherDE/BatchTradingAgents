@@ -405,7 +405,7 @@ class RemoteWorker:
         thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
         model = self.provider_config.quick_model
         response = await self._llm_call(model, _build_watchlist_addition_prompt(
-            payload, symbol, strategy, thresholds.get("instruction", ""), len(symbols)
+            payload, symbol, strategy, thresholds.get("discovery_instruction", thresholds.get("instruction", "")), len(symbols)
         ))
         return _parse_json_response(response, default_score=0.0)
 

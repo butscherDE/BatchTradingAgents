@@ -226,7 +226,7 @@ class OllamaWorker:
             summary=payload.get("summary", ""),
             symbol=symbol,
             strategy=strategy,
-            strategy_instruction=thresholds.get("instruction", ""),
+            strategy_instruction=thresholds.get("discovery_instruction", thresholds.get("instruction", "")),
             num_symbols=len(symbols),
             llm_call=partial(self._llm_call, model),
         )
