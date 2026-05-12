@@ -112,7 +112,6 @@ export default function Tasks() {
                 <th>Quick</th>
                 <th>Deep</th>
                 <th>Active</th>
-                <th>Limit</th>
                 <th>Completed</th>
                 <th>Failed</th>
                 <th></th>
@@ -127,11 +126,10 @@ export default function Tasks() {
                       {p.state ?? 'offline'}
                     </span>
                   </td>
-                  <td>{p.queue_depth}</td>
+                  <td>{p.queue_depth}/{p.max_queue < 0 ? '∞' : p.max_queue}</td>
                   <td>{p.quick_queued}</td>
                   <td>{p.deep_queued}</td>
                   <td>{p.active_tasks}/{p.max_concurrent}</td>
-                  <td>{p.max_queue < 0 ? '∞' : p.max_queue}</td>
                   <td className="positive">{p.completed}</td>
                   <td className="negative">{p.failed}</td>
                   <td>
@@ -155,7 +153,6 @@ export default function Tasks() {
                 <td>{stats?.providers?.reduce((s, p) => s + p.quick_queued, 0) ?? 0}</td>
                 <td>{stats?.providers?.reduce((s, p) => s + p.deep_queued, 0) ?? 0}</td>
                 <td>{stats?.providers?.reduce((s, p) => s + p.active_tasks, 0) ?? 0}</td>
-                <td></td>
                 <td className="positive">{stats?.providers?.reduce((s, p) => s + p.completed, 0) ?? 0}</td>
                 <td className="negative">{stats?.providers?.reduce((s, p) => s + p.failed, 0) ?? 0}</td>
                 <td></td>

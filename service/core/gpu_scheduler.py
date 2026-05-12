@@ -160,6 +160,18 @@ class GpuScheduler:
 
     async def pause_provider(self, name: str):
         await self._redis.set(f"gpu:provider:{name}:paused", "1")
+        # Drain queued tasks to other available providers
+        queue_key = f"gpu:provider:{name}:queue"
+        moved = 0
+        while True:
+            raw = await self._redis.lpop(queue_key)
+            if raw is None:
+                break
+            task_data = json.loads(raw)
+            # Re-route via the router (will skip this paused provider)
+            await self._router.route(task_data)
+            moved += 1
+        return moved
 
     async def resume_provider(self, name: str):
         await self._redis.delete(f"gpu:provider:{name}:paused")
