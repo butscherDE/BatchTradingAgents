@@ -278,3 +278,58 @@ Respond in JSON:
 
     response = _invoke(llm_call, ollama_url, model, prompt)
     return _parse_json_response(response, default_score=0.0)
+
+
+def rank_and_prune_watchlist(
+    tickers_with_context: list[dict],
+    max_tickers: int,
+    strategy: str,
+    strategy_instruction: str,
+    held_symbols: list[str],
+    ollama_url: str = "",
+    model: str = "",
+    llm_call: Callable[[str], str] | None = None,
+) -> dict:
+    """Rank all watchlist tickers and decide which to remove to fit under max_tickers.
+
+    tickers_with_context: list of {"symbol": str, "added_by": str, "recent_headlines": list[str]}
+    Returns: {"keep": [...], "remove": [{"symbol": ..., "reasoning": ...}], "ranking_reasoning": str}
+    """
+    current_count = len(tickers_with_context)
+    need_to_remove = max(0, current_count - max_tickers)
+
+    ticker_lines = []
+    for t in tickers_with_context:
+        headlines = t.get("recent_headlines", [])
+        headlines_str = "; ".join(headlines[:5]) if headlines else "(no recent news)"
+        held_marker = " [HELD - cannot remove]" if t["symbol"] in held_symbols else ""
+        ticker_lines.append(f"  - {t['symbol']}{held_marker} (added by: {t['added_by']}): {headlines_str}")
+    tickers_str = "\n".join(ticker_lines)
+
+    held_str = ", ".join(held_symbols) if held_symbols else "(none)"
+
+    prompt = f"""You are a portfolio watchlist manager for a **{strategy}** portfolio.
+
+**Strategy description:** {strategy_instruction}
+
+**Current watchlist ({current_count} tickers, limit is {max_tickers}):**
+{tickers_str}
+
+**Currently held positions (CANNOT be removed):** {held_str}
+**Need to remove:** {need_to_remove} ticker(s) to reach the limit of {max_tickers}
+
+**Instructions:**
+Rank all tickers by their fit for the {strategy} strategy. Consider:
+1. Strength of current thesis / catalyst pipeline
+2. Recency and materiality of news flow
+3. Fit with the {strategy} risk profile
+4. Whether the story is still developing or has played out
+
+Then select exactly {need_to_remove} ticker(s) to REMOVE (lowest-ranked that are not held positions).
+If a ticker is marked [HELD], you CANNOT remove it regardless of ranking.
+
+Respond in this exact JSON format:
+{{"keep": ["SYM1", "SYM2", ...], "remove": [{{"symbol": "SYM", "reasoning": "one sentence"}}], "ranking_reasoning": "brief explanation of ranking logic"}}"""
+
+    response = _invoke(llm_call, ollama_url, model, prompt)
+    return _parse_json_response(response, default_score=0.0)

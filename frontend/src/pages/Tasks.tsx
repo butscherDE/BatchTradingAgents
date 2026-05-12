@@ -209,6 +209,7 @@ export default function Tasks() {
           <option value="merge_and_allocate">merge_and_allocate</option>
           <option value="watchlist_discovery">watchlist_discovery</option>
           <option value="watchlist_prune">watchlist_prune</option>
+          <option value="watchlist_rank_prune">watchlist_rank_prune</option>
         </select>
         <select value={modelFilter} onChange={e => setFilter('model', e.target.value)}>
           <option value="">All tiers</option>

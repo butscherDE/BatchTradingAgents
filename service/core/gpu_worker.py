@@ -177,6 +177,8 @@ class OllamaWorker:
             return self._watchlist_discovery(payload)
         elif task_type == "watchlist_prune":
             return self._watchlist_prune(payload)
+        elif task_type == "watchlist_rank_prune":
+            return self._watchlist_rank_prune(payload)
         else:
             raise ValueError(f"Unknown task type: {task_type}")
 
@@ -256,6 +258,21 @@ class OllamaWorker:
                 recent_headlines=payload.get("recent_headlines", []),
                 llm_call=partial(self._llm_call, model),
             )
+
+    def _watchlist_rank_prune(self, payload: dict) -> dict:
+        from service.core.news_screener import rank_and_prune_watchlist
+        from cli.position_risk import STRATEGY_THRESHOLDS
+        strategy = payload.get("strategy", "balanced")
+        thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
+        model = self.provider_config.deep_model
+        return rank_and_prune_watchlist(
+            tickers_with_context=payload["tickers"],
+            max_tickers=payload["max_tickers"],
+            strategy=strategy,
+            strategy_instruction=thresholds.get("instruction", ""),
+            held_symbols=payload.get("held_symbols", []),
+            llm_call=partial(self._llm_call, model),
+        )
 
     def _full_analysis(self, payload: dict) -> dict:
         from shared.analysis import run_single_ticker

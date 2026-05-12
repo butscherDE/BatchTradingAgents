@@ -421,6 +421,8 @@ async def _listen_for_results():
                     await _handle_discovery_result(data)
                 elif task_type == "watchlist_prune" and status == "completed":
                     await _handle_prune_result(data)
+                elif task_type == "watchlist_rank_prune" and status == "completed":
+                    await _handle_rank_prune_result(data)
                 elif task_type == "news_consolidate" and status == "completed":
                     await _handle_consolidate_result(data)
 
@@ -949,6 +951,68 @@ async def _handle_prune_result(data: dict):
             await session.commit()
 
 
+async def _handle_rank_prune_result(data: dict):
+    """Process a rank-and-prune result — remove the lowest-ranked tickers."""
+    from service.api.ws import broadcast
+    from service.db.models import WatchlistTicker, WatchlistEvent
+    from sqlalchemy import select, update
+
+    result = data.get("result", {})
+    task_id = data.get("task_id")
+
+    # Get account_id from task payload
+    async with get_db_session() as session:
+        task_result = await session.execute(
+            select(GpuTask).where(GpuTask.task_id == task_id)
+        )
+        task = task_result.scalar_one_or_none()
+
+    if not task or not task.payload:
+        return
+
+    account_id = task.payload.get("account_id")
+    to_remove = result.get("remove", [])
+
+    if not to_remove or not account_id:
+        return
+
+    for entry in to_remove:
+        symbol = entry.get("symbol", "").upper()
+        reasoning = entry.get("reasoning", "ranked lowest in prune")
+        if not symbol:
+            continue
+
+        async with get_db_session() as session:
+            await session.execute(
+                update(WatchlistTicker)
+                .where(
+                    WatchlistTicker.account_id == account_id,
+                    WatchlistTicker.symbol == symbol,
+                )
+                .values(
+                    active=0,
+                    removed_at=datetime.datetime.utcnow(),
+                    remove_reason=reasoning,
+                )
+            )
+            session.add(WatchlistEvent(
+                account_id=account_id,
+                symbol=symbol,
+                action="removed",
+                trigger="auto_prune",
+                reasoning=reasoning,
+            ))
+            await session.commit()
+
+        logger.info(f"Rank-pruned {symbol} from {account_id}: {reasoning}")
+        await broadcast("watchlist_changed", {
+            "action": "removed",
+            "symbol": symbol,
+            "account_id": account_id,
+            "reason": reasoning,
+        })
+
+
 def _execute_emergency_sell(acct, ticker: str, reason: str) -> dict | None:
     from service.core.trade_executor import execute_emergency_sell
     sell_fraction = _config.evaluation.sell_fraction if _config else 0.5
@@ -1108,24 +1172,31 @@ async def _prune_scheduler():
 
 
 async def _run_prune_for_account(account_name: str, acct):
-    """Submit prune tasks for all active tickers in an account (excluding held positions)."""
-    from service.db.models import WatchlistTicker
-    from sqlalchemy import select
+    """Submit a single rank-and-prune task for an account's watchlist."""
+    from service.db.models import WatchlistTicker, NewsArticle
+    from sqlalchemy import select, desc
 
-    # Get active tickers
+    # Get active tickers with metadata
     async with get_db_session() as session:
         result = await session.execute(
-            select(WatchlistTicker.symbol).where(
+            select(WatchlistTicker).where(
                 WatchlistTicker.account_id == account_name,
                 WatchlistTicker.active == 1,
             )
         )
-        tickers = list(result.scalars().all())
+        watchlist_entries = list(result.scalars().all())
 
-    if not tickers:
+    if not watchlist_entries:
         return
 
-    # Exclude held positions
+    max_tickers = acct.max_watchlist
+
+    # If already under limit, skip
+    if len(watchlist_entries) <= max_tickers:
+        logger.info(f"Prune: {account_name} has {len(watchlist_entries)}/{max_tickers} tickers, no prune needed")
+        return
+
+    # Get held positions (cannot be pruned)
     held_symbols = set()
     try:
         from alpaca.trading.client import TradingClient
@@ -1140,37 +1211,56 @@ async def _run_prune_for_account(account_name: str, acct):
     except Exception:
         pass
 
-    prunable = [t for t in tickers if t not in held_symbols]
-    if not prunable:
-        return
+    # Fetch recent headlines for each ticker
+    tickers_with_context = []
+    for entry in watchlist_entries:
+        recent_headlines = []
+        try:
+            async with get_db_session() as session:
+                headline_result = await session.execute(
+                    select(NewsArticle.headline)
+                    .where(NewsArticle.symbols.contains(entry.symbol))
+                    .order_by(desc(NewsArticle.received_at))
+                    .limit(5)
+                )
+                recent_headlines = list(headline_result.scalars().all())
+        except Exception:
+            pass
+        tickers_with_context.append({
+            "symbol": entry.symbol,
+            "added_by": entry.added_by or "unknown",
+            "recent_headlines": recent_headlines,
+        })
 
-    logger.info(f"Prune: evaluating {len(prunable)} tickers for {account_name} (skipping {len(held_symbols)} held)")
+    logger.info(f"Prune: submitting rank-and-prune for {account_name} ({len(watchlist_entries)} tickers, limit {max_tickers}, {len(held_symbols)} held)")
 
-    for symbol in prunable:
-        task_id = await _scheduler.submit(TaskSpec(
-            model_tier="quick",
-            task_type="watchlist_prune",
-            payload={
-                "symbol": symbol,
-                "account_id": account_name,
-                "strategy": acct.strategy,
-                "stage": "quick",
-                "recent_headlines": [],  # TODO: fetch recent headlines
-            },
-            ticker=symbol,
-        ))
-        async with get_db_session() as session:
-            db_task = GpuTask(
-                task_id=task_id,
-                model_tier="quick",
-                task_type="watchlist_prune",
-                ticker=symbol,
-                priority=2,  # low priority
-                status=TaskStatus.queued,
-                payload={"symbol": symbol, "account_id": account_name, "stage": "quick"},
-            )
-            session.add(db_task)
-            await session.commit()
+    payload = {
+        "account_id": account_name,
+        "strategy": acct.strategy,
+        "tickers": tickers_with_context,
+        "max_tickers": max_tickers,
+        "held_symbols": list(held_symbols),
+    }
+
+    task_id = await _scheduler.submit(TaskSpec(
+        model_tier="deep",
+        task_type="watchlist_rank_prune",
+        payload=payload,
+        ticker=None,
+        priority=2,
+    ))
+    async with get_db_session() as session:
+        db_task = GpuTask(
+            task_id=task_id,
+            model_tier="deep",
+            task_type="watchlist_rank_prune",
+            ticker=None,
+            priority=2,
+            status=TaskStatus.queued,
+            payload=payload,
+        )
+        session.add(db_task)
+        await session.commit()
 
 
 def _fetch_yfinance_news(ticker: str, count: int = 10) -> list[dict]:

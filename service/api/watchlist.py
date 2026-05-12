@@ -278,6 +278,24 @@ async def trigger_analysis(
     return {"submitted": submitted, "count": len(submitted)}
 
 
+@router.post("/prune")
+async def trigger_prune(
+    account_id: str = Query(...),
+):
+    """Trigger watchlist pruning for an account — ranks tickers and removes lowest to fit max_watchlist."""
+    from service.app import _config, _run_prune_for_account
+
+    if not _config:
+        raise HTTPException(status_code=503, detail="Service not initialized")
+
+    acct = _config.accounts.get(account_id)
+    if not acct:
+        raise HTTPException(status_code=404, detail=f"Account '{account_id}' not found")
+
+    await _run_prune_for_account(account_id, acct)
+    return {"status": "submitted", "account_id": account_id, "max_watchlist": acct.max_watchlist}
+
+
 def _validate_ticker(symbol: str) -> bool:
     from service.app import _config
     if not _config or not _config.accounts:

@@ -361,6 +361,8 @@ class RemoteWorker:
             return await self._watchlist_discovery(payload)
         elif task_type == "watchlist_prune":
             return await self._watchlist_prune(payload)
+        elif task_type == "watchlist_rank_prune":
+            return await self._watchlist_rank_prune(payload)
         elif task_type == "full_analysis":
             return await asyncio.to_thread(self._full_analysis_sync, payload)
         elif task_type == "merge_and_allocate":
@@ -423,6 +425,29 @@ class RemoteWorker:
                 payload, strategy, thresholds.get("instruction", "")
             ))
         return _parse_json_response(response, default_score=0.0)
+
+    async def _watchlist_rank_prune(self, payload: dict) -> dict:
+        from service.core.news_screener import rank_and_prune_watchlist
+        from cli.position_risk import STRATEGY_THRESHOLDS
+        strategy = payload.get("strategy", "balanced")
+        thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
+        model = self.provider_config.deep_model
+        llm_call = partial(self._llm_call_sync_wrapper, model)
+        return await asyncio.to_thread(
+            rank_and_prune_watchlist,
+            tickers_with_context=payload["tickers"],
+            max_tickers=payload["max_tickers"],
+            strategy=strategy,
+            strategy_instruction=thresholds.get("instruction", ""),
+            held_symbols=payload.get("held_symbols", []),
+            llm_call=llm_call,
+        )
+
+    def _llm_call_sync_wrapper(self, model: str, prompt: str) -> str:
+        from service.core.llm_adapter import call_llm_sync
+        def _on_usage(prompt_tokens: int, completion_tokens: int):
+            record_token_usage(self.provider_name, model, prompt_tokens, completion_tokens)
+        return call_llm_sync(self.provider_config, model, prompt, on_usage=_on_usage)
 
     async def _publish_status(self, state: str, message: str):
         status = {

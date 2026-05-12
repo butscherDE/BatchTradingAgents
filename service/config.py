@@ -62,6 +62,7 @@ class AccountConfig(BaseSettings):
     watchlist: str = "aggressive"
     dynamic_discovery: bool = False
     auto_prune: bool = False
+    max_watchlist: int = 20
 
 
 class ServiceConfig(BaseSettings):
@@ -114,6 +115,7 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
             watchlist=acct.get("watchlist", "aggressive"),
             dynamic_discovery=acct.get("dynamic_discovery", False),
             auto_prune=acct.get("auto_prune", False),
+            max_watchlist=acct.get("max_watchlist", 20),
         )
 
     providers = {}
