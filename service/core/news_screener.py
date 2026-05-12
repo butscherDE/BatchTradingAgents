@@ -318,10 +318,16 @@ def rank_and_prune_watchlist(
 
     for i in range(0, len(tickers_with_context), BATCH_SIZE):
         batch = tickers_with_context[i:i + BATCH_SIZE]
-        batch_scores = _score_ticker_batch(
-            batch, strategy, strategy_instruction, held_symbols,
-            ollama_url, model, llm_call,
-        )
+        try:
+            batch_scores = _score_ticker_batch(
+                batch, strategy, strategy_instruction, held_symbols,
+                ollama_url, model, llm_call,
+            )
+        except Exception:
+            batch_scores = [
+                {"symbol": t["symbol"], "score": 5, "reasoning": "batch scoring failed"}
+                for t in batch
+            ]
         scored.extend(batch_scores)
 
     # Held symbols get max score (cannot be removed)
