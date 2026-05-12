@@ -431,7 +431,7 @@ class RemoteWorker:
         from cli.position_risk import STRATEGY_THRESHOLDS
         strategy = payload.get("strategy", "balanced")
         thresholds = STRATEGY_THRESHOLDS.get(strategy, STRATEGY_THRESHOLDS["balanced"])
-        model = self.provider_config.deep_model
+        model = self.provider_config.quick_model
         llm_call = partial(self._llm_call_sync_wrapper, model)
         return await asyncio.to_thread(
             rank_and_prune_watchlist,

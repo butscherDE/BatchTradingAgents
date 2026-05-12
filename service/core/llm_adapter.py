@@ -13,16 +13,19 @@ _THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
 
 UsageCallback = Optional[Callable[[int, int], None]]
 
+DEFAULT_TIMEOUT = 300
+
 
 def call_llm_sync(
     provider_config: ProviderConfig,
     model: str,
     prompt: str,
     on_usage: UsageCallback = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> str:
     if provider_config.type == "ollama":
-        return _call_ollama_sync(provider_config.url, model, prompt, on_usage)
-    return _call_openai_sync(provider_config, model, prompt, on_usage)
+        return _call_ollama_sync(provider_config.url, model, prompt, on_usage, timeout)
+    return _call_openai_sync(provider_config, model, prompt, on_usage, timeout)
 
 
 async def call_llm_async(
@@ -30,17 +33,18 @@ async def call_llm_async(
     model: str,
     prompt: str,
     on_usage: UsageCallback = None,
+    timeout: int = DEFAULT_TIMEOUT,
 ) -> str:
     if provider_config.type == "ollama":
-        return await _call_ollama_async(provider_config.url, model, prompt, on_usage)
-    return await _call_openai_async(provider_config, model, prompt, on_usage)
+        return await _call_ollama_async(provider_config.url, model, prompt, on_usage, timeout)
+    return await _call_openai_async(provider_config, model, prompt, on_usage, timeout)
 
 
-def _call_ollama_sync(url: str, model: str, prompt: str, on_usage: UsageCallback = None) -> str:
+def _call_ollama_sync(url: str, model: str, prompt: str, on_usage: UsageCallback = None, timeout: int = DEFAULT_TIMEOUT) -> str:
     resp = requests.post(
         f"{url}/api/generate",
         json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1}},
-        timeout=120,
+        timeout=timeout,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -52,8 +56,8 @@ def _call_ollama_sync(url: str, model: str, prompt: str, on_usage: UsageCallback
     return data.get("response", "")
 
 
-async def _call_ollama_async(url: str, model: str, prompt: str, on_usage: UsageCallback = None) -> str:
-    async with httpx.AsyncClient(timeout=120) as client:
+async def _call_ollama_async(url: str, model: str, prompt: str, on_usage: UsageCallback = None, timeout: int = DEFAULT_TIMEOUT) -> str:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             f"{url}/api/generate",
             json={"model": model, "prompt": prompt, "stream": False, "options": {"temperature": 0.1}},
@@ -68,7 +72,7 @@ async def _call_ollama_async(url: str, model: str, prompt: str, on_usage: UsageC
         return data.get("response", "")
 
 
-def _call_openai_sync(config: ProviderConfig, model: str, prompt: str, on_usage: UsageCallback = None) -> str:
+def _call_openai_sync(config: ProviderConfig, model: str, prompt: str, on_usage: UsageCallback = None, timeout: int = DEFAULT_TIMEOUT) -> str:
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
@@ -86,7 +90,7 @@ def _call_openai_sync(config: ProviderConfig, model: str, prompt: str, on_usage:
             "temperature": 0.1,
             "chat_template_kwargs": {"enable_thinking": False},
         },
-        timeout=120,
+        timeout=timeout,
     )
     resp.raise_for_status()
     data = resp.json()
@@ -100,7 +104,7 @@ def _call_openai_sync(config: ProviderConfig, model: str, prompt: str, on_usage:
     return _strip_think_tags(content)
 
 
-async def _call_openai_async(config: ProviderConfig, model: str, prompt: str, on_usage: UsageCallback = None) -> str:
+async def _call_openai_async(config: ProviderConfig, model: str, prompt: str, on_usage: UsageCallback = None, timeout: int = DEFAULT_TIMEOUT) -> str:
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
@@ -109,7 +113,7 @@ async def _call_openai_async(config: ProviderConfig, model: str, prompt: str, on
     if not url.endswith("/chat/completions"):
         url += "/chat/completions"
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             url,
             headers=headers,
