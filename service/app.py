@@ -960,7 +960,9 @@ async def _handle_rank_prune_result(data: dict):
     result = data.get("result", {})
     task_id = data.get("task_id")
 
-    # Get account_id from task payload
+    if result.get("parse_error"):
+        logger.error(f"Rank-prune task {task_id} returned unparseable response")
+        return
     async with get_db_session() as session:
         task_result = await session.execute(
             select(GpuTask).where(GpuTask.task_id == task_id)

@@ -145,7 +145,14 @@ def _call_ollama(ollama_url: str, model: str, prompt: str) -> str:
 
 
 def _parse_json_response(response: str, default_score: float = 0.0) -> dict:
+    import re
     text = response.strip()
+    # Strip think tags
+    text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+    # Strip markdown code fences
+    text = re.sub(r"```json\s*", "", text)
+    text = re.sub(r"```\s*$", "", text)
+    text = text.strip()
     start = text.find("{")
     end = text.rfind("}") + 1
     if start >= 0 and end > start:
