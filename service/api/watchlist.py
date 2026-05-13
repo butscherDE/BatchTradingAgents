@@ -301,14 +301,6 @@ def _validate_ticker(symbol: str) -> bool:
     if not _config or not _config.accounts:
         return True
     acct = next(iter(_config.accounts.values()))
-    if acct.brokerage == "etrade":
-        from cli.broker import create_broker_from_config
-        try:
-            client = create_broker_from_config(acct)
-            quotes = client.get_quotes([symbol])
-            return symbol in quotes
-        except Exception:
-            return True
     try:
         from alpaca.trading.client import TradingClient
         client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
@@ -344,17 +336,29 @@ def _search_tickers(query: str) -> list[dict]:
     if _config and _config.accounts:
         acct = next(iter(_config.accounts.values()))
         try:
-            from cli.broker import create_broker_from_config
-            client = create_broker_from_config(acct)
+            from alpaca.data.historical import StockHistoricalDataClient
+            from alpaca.data.requests import StockSnapshotRequest
+
+            data_client = StockHistoricalDataClient(acct.api_key, acct.api_secret)
             symbols = [r["symbol"] for r in results]
-            quotes = client.get_quotes(symbols)
+            snapshots = data_client.get_stock_snapshot(
+                StockSnapshotRequest(symbol_or_symbols=symbols)
+            )
 
             for r in results:
-                price = quotes.get(r["symbol"])
-                if price:
+                snap = snapshots.get(r["symbol"])
+                if snap and snap.latest_trade:
+                    price = float(snap.latest_trade.price)
+                    prev_close = float(snap.previous_daily_bar.close) if snap.previous_daily_bar else None
+                    if prev_close:
+                        day_change = price - prev_close
+                        day_change_pct = (day_change / prev_close) * 100
+                    else:
+                        day_change = 0
+                        day_change_pct = 0
                     r["price"] = price
-                    r["day_change"] = None
-                    r["day_change_pct"] = None
+                    r["day_change"] = day_change
+                    r["day_change_pct"] = day_change_pct
                 else:
                     r["price"] = None
                     r["day_change"] = None

@@ -178,34 +178,36 @@ async def reject_proposal(proposal_id: int, session: AsyncSession = Depends(get_
 
 
 def _execute_orders(acct, orders: list[dict]) -> list[dict]:
-    from cli.broker import create_broker_from_config
+    from alpaca.trading.client import TradingClient
+    from alpaca.trading.requests import MarketOrderRequest
+    from alpaca.trading.enums import OrderSide, TimeInForce
 
-    client = create_broker_from_config(acct)
+    client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
     results = []
 
     for order in orders:
         try:
-            side = "buy" if order.get("side") == "buy" else "sell"
-            qty = order.get("qty")
-            notional = order.get("notional")
-
-            if not qty and not notional:
+            side = OrderSide.BUY if order.get("side") == "buy" else OrderSide.SELL
+            kwargs = {
+                "symbol": order["ticker"],
+                "side": side,
+                "time_in_force": TimeInForce.DAY,
+            }
+            if order.get("qty"):
+                kwargs["qty"] = order["qty"]
+            elif order.get("notional"):
+                kwargs["notional"] = order["notional"]
+            else:
                 results.append({"ticker": order["ticker"], "error": "No qty or notional"})
                 continue
 
-            result = client.submit_order(
-                symbol=order["ticker"],
-                qty=qty or 0,
-                side=side,
-                notional=notional if not qty else None,
-            )
+            submitted = client.submit_order(MarketOrderRequest(**kwargs))
             results.append({
                 "ticker": order["ticker"],
-                "side": side,
-                "qty": qty,
-                "order_id": result.order_id,
-                "status": result.status,
-                "error": result.error,
+                "side": order.get("side"),
+                "qty": order.get("qty"),
+                "order_id": str(submitted.id),
+                "status": submitted.status.value,
             })
         except Exception as e:
             results.append({
@@ -272,13 +274,10 @@ async def trigger_merge_allocate(
     # Fetch portfolio
     portfolio = None
     try:
-        from cli.broker import create_broker_from_config
-        client = create_broker_from_config(acct)
-        positions = client.get_positions()
-        cash = client.get_account_cash()
-        holdings = {p.symbol: p.qty for p in positions}
-        prices = {p.symbol: p.current_price for p in positions if p.current_price}
-        portfolio = {"holdings": holdings, "cash": cash, "prices": prices}
+        from cli.alpaca_client import create_client, fetch_portfolio
+        client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+        port, _, prices, _ = fetch_portfolio(client)
+        portfolio = {"holdings": port.holdings, "cash": port.cash, "prices": prices}
     except Exception:
         pass
 

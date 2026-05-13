@@ -3,7 +3,9 @@
 import logging
 from typing import Optional
 
-from cli.broker import create_broker_client
+from alpaca.trading.client import TradingClient
+from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderSide, TimeInForce
 
 logger = logging.getLogger(__name__)
 
@@ -15,55 +17,54 @@ def execute_emergency_sell(
     ticker: str,
     sell_fraction: float,
     reason: str,
-    brokerage: str = "alpaca",
-    oauth_token: str = "",
-    oauth_token_secret: str = "",
-    etrade_account_id_key: str = "",
 ) -> Optional[dict]:
     """Immediately sell a fraction of a position.
 
     Returns order details dict or None if no position exists.
     """
-    client = create_broker_client(
-        brokerage=brokerage,
-        api_key=api_key,
-        api_secret=api_secret,
-        is_paper=is_paper,
-        oauth_token=oauth_token,
-        oauth_token_secret=oauth_token_secret,
-        etrade_account_id_key=etrade_account_id_key,
-    )
+    client = TradingClient(api_key, api_secret, paper=is_paper)
 
-    position = client.get_position(ticker)
-    if position is None or position.qty <= 0:
+    try:
+        position = client.get_open_position(ticker)
+    except Exception:
         logger.info(f"No open position for {ticker}, skipping emergency sell")
         return None
 
-    qty = position.qty
+    qty = float(position.qty)
+    if qty <= 0:
+        return None
+
     sell_qty = max(1, int(qty * sell_fraction))
 
     logger.warning(
         f"EMERGENCY SELL: {ticker} — selling {sell_qty}/{int(qty)} shares. Reason: {reason}"
     )
 
-    result = client.submit_order(symbol=ticker, qty=sell_qty, side="sell")
+    try:
+        order = client.submit_order(
+            MarketOrderRequest(
+                symbol=ticker,
+                qty=sell_qty,
+                side=OrderSide.SELL,
+                time_in_force=TimeInForce.DAY,
+            )
+        )
+        result = {
+            "ticker": ticker,
+            "qty_sold": sell_qty,
+            "qty_remaining": int(qty) - sell_qty,
+            "order_id": str(order.id),
+            "status": order.status.value,
+            "reason": reason,
+        }
+        logger.info(f"Emergency sell order submitted: {result}")
+        return result
 
-    if result.error:
-        logger.error(f"Failed to submit emergency sell for {ticker}: {result.error}")
+    except Exception as e:
+        logger.error(f"Failed to submit emergency sell for {ticker}: {e}")
         return {
             "ticker": ticker,
             "qty_sold": 0,
-            "error": result.error,
+            "error": str(e),
             "reason": reason,
         }
-
-    order_result = {
-        "ticker": ticker,
-        "qty_sold": sell_qty,
-        "qty_remaining": int(qty) - sell_qty,
-        "order_id": result.order_id,
-        "status": result.status,
-        "reason": reason,
-    }
-    logger.info(f"Emergency sell order submitted: {order_result}")
-    return order_result
