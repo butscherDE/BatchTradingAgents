@@ -179,42 +179,39 @@ export default function Proposals() {
       <h1>Trade Proposals</h1>
 
       <div className="stat-card" style={{ marginBottom: 24, padding: '16px 20px' }}>
-        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>Merge & Allocation</h3>
+        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 16, textTransform: 'uppercase' }}>Merge & Allocation</h3>
 
-        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
           {/* Manual trigger */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 260 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Run Now</span>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
-              <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ width: 160, fontSize: 12 }}>
+          <div>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Run Now</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
+              <span style={{ fontSize: 13 }}>Account</span>
+              <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ fontSize: 13 }}>
                 <option value="">Select account...</option>
                 {accounts.map((a: AccountSummary) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Merge checks</span>
-              <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
+
+              <span style={{ fontSize: 13 }}>Merge checks</span>
+              <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
                 <option value={0}>0</option>
                 <option value={1}>1</option>
                 <option value={2}>2</option>
                 <option value={3}>3</option>
               </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks</span>
-              <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
+
+              <span style={{ fontSize: 13 }}>Alloc checks</span>
+              <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
                 <option value={0}>0</option>
                 <option value={1}>1</option>
                 <option value={2}>2</option>
                 <option value={3}>3</option>
               </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Provider</span>
-              <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ width: 160, fontSize: 12 }}>
+
+              <span style={{ fontSize: 13 }}>Provider</span>
+              <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ fontSize: 13 }}>
                 <option value="">Auto (priority)</option>
                 {taskStats?.providers?.map(p => (
                   <option key={p.name} value={p.name}>{p.name}</option>
@@ -224,22 +221,22 @@ export default function Proposals() {
             <button
               onClick={() => triggerMutation.mutate()}
               disabled={triggerMutation.isPending || !selectedAccount}
-              style={{ marginTop: 4, alignSelf: 'flex-start' }}
+              style={{ marginTop: 12 }}
             >
               {triggerMutation.isPending ? 'Submitting...' : 'Run'}
             </button>
             {triggerMutation.isError && (
-              <p style={{ color: 'var(--red)', fontSize: 13 }}>
+              <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
                 {(triggerMutation.error as Error).message}
               </p>
             )}
           </div>
 
           {/* Schedule config */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 320 }}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Schedule (UTC)</span>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
+          <div>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Schedule (UTC)</span>
+            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
+              <span style={{ fontSize: 13 }}>Account</span>
               <select
                 value={schedAccount}
                 onChange={e => {
@@ -253,16 +250,15 @@ export default function Proposals() {
                     setSchedTimes('06:00, 09:00, 12:00')
                   }
                 }}
-                style={{ width: 200, fontSize: 12 }}
+                style={{ fontSize: 13 }}
               >
                 <option value="">Select account...</option>
                 {accounts.map((a: AccountSummary) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
               </select>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Days</span>
+
+              <span style={{ fontSize: 13 }}>Days</span>
               <div style={{ display: 'flex', gap: 4 }}>
                 {DAY_LABELS.map((label, i) => (
                   <button
@@ -270,30 +266,30 @@ export default function Proposals() {
                     onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
                     style={{
                       fontSize: 11,
-                      padding: '3px 6px',
-                      background: schedDays.includes(i) ? 'var(--accent)' : 'var(--bg-secondary)',
+                      padding: '4px 7px',
+                      background: schedDays.includes(i) ? 'var(--accent)' : 'transparent',
                       color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
                       border: 'none',
                       borderRadius: 3,
                       cursor: 'pointer',
+                      fontWeight: schedDays.includes(i) ? 600 : 400,
                     }}
                   >
                     {label}
                   </button>
                 ))}
               </div>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Times</span>
+
+              <span style={{ fontSize: 13 }}>Times</span>
               <input
                 type="text"
                 value={schedTimes}
                 onChange={e => setSchedTimes(e.target.value)}
                 placeholder="06:00, 09:00, 12:00"
-                style={{ width: 200, fontSize: 12, padding: '4px 8px' }}
+                style={{ fontSize: 13, padding: '5px 8px' }}
               />
             </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
               <button
                 onClick={() => {
                   const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
@@ -311,12 +307,12 @@ export default function Proposals() {
                   Delete
                 </button>
               )}
+              {schedSaved && (
+                <span style={{ color: 'var(--green)', fontSize: 12 }}>Saved.</span>
+              )}
             </div>
-            {schedSaved && (
-              <p style={{ color: 'var(--green)', fontSize: 12, margin: 0 }}>Schedule saved.</p>
-            )}
             {saveScheduleMutation.isError && (
-              <p style={{ color: 'var(--red)', fontSize: 12, margin: 0 }}>
+              <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
                 {(saveScheduleMutation.error as Error).message}
               </p>
             )}
@@ -352,7 +348,7 @@ export default function Proposals() {
                           setSchedDays(s.days)
                           setSchedTimes(s.times.join(', '))
                         }}
-                        style={{ fontSize: 11, padding: '3px 8px', marginRight: 4 }}
+                        style={{ fontSize: 11, padding: '3px 8px' }}
                       >
                         edit
                       </button>
