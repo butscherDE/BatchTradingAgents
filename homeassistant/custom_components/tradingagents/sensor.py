@@ -26,6 +26,24 @@ SENSORS = [
         "unit": "tasks",
     },
     {
+        "key": "active_tasks",
+        "name": "Active Tasks",
+        "icon": "mdi:run",
+        "unit": "tasks",
+    },
+    {
+        "key": "total_completed",
+        "name": "Total Completed",
+        "icon": "mdi:check-circle",
+        "unit": "tasks",
+    },
+    {
+        "key": "total_failed",
+        "name": "Total Failed",
+        "icon": "mdi:alert-circle",
+        "unit": "tasks",
+    },
+    {
         "key": "alpaca_status",
         "name": "Alpaca Stream",
         "icon": "mdi:access-point",
@@ -40,6 +58,28 @@ SENSORS = [
         "name": "Pending Proposals",
         "icon": "mdi:hand-coin",
         "unit": "proposals",
+    },
+    {
+        "key": "provider_local_state",
+        "name": "Local Provider",
+        "icon": "mdi:server",
+    },
+    {
+        "key": "provider_local_queue",
+        "name": "Local Queue",
+        "icon": "mdi:tray-arrow-down",
+        "unit": "tasks",
+    },
+    {
+        "key": "provider_deepinfra_state",
+        "name": "DeepInfra Provider",
+        "icon": "mdi:cloud",
+    },
+    {
+        "key": "provider_deepinfra_queue",
+        "name": "DeepInfra Queue",
+        "icon": "mdi:tray-arrow-down",
+        "unit": "tasks",
     },
 ]
 

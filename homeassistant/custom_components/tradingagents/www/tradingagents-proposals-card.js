@@ -232,7 +232,7 @@ class TradingAgentsProposalsCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { api_url: "http://10.0.0.15:8000" };
+    return { api_url: "http://10.0.0.216:8000" };
   }
 }
 
