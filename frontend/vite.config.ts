@@ -8,9 +8,9 @@ export default defineConfig({
     port: 5175,
     allowedHosts: ["home.metzger.pro"],
     proxy: {
-      '/api': 'http://10.0.0.15:8000',
+      '/api': 'http://10.0.0.14:8000',
       '/ws': {
-        target: 'ws://10.0.0.15:8000',
+        target: 'ws://10.0.0.14:8000',
         ws: true,
       },
     },
