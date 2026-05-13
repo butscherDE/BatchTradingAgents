@@ -303,7 +303,8 @@ class OllamaWorker:
         final_state = result["final_state"]
 
         analysis_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
-        reports_dir = Path("reports") / f"{ticker}_{analysis_date}"
+        fs_ticker = ticker.replace(":", "_")
+        reports_dir = Path("reports") / f"{fs_ticker}_{analysis_date}"
         try:
             from cli.main import save_report_to_disk
             save_report_to_disk(final_state, ticker, reports_dir)
@@ -312,7 +313,7 @@ class OllamaWorker:
 
         state_dir = Path("reports") / "_states"
         state_dir.mkdir(parents=True, exist_ok=True)
-        state_file = state_dir / f"{ticker}.json"
+        state_file = state_dir / f"{fs_ticker}.json"
         serializable_state = {
             "generated_at": datetime.datetime.utcnow().isoformat(),
             "final_trade_decision": final_state.get("final_trade_decision", ""),

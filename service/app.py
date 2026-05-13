@@ -1036,7 +1036,7 @@ async def _load_report_from_disk(ticker: str) -> dict | None:
     from pathlib import Path
     import json
 
-    state_file = Path("reports") / "_states" / f"{ticker}.json"
+    state_file = Path("reports") / "_states" / f"{ticker.replace(':', '_')}.json"
     if not state_file.exists():
         return None
     try:
@@ -1059,7 +1059,7 @@ def _get_current_thesis(ticker: str) -> str:
             return thesis[:1000]
 
     # Fall back to disk
-    state_file = Path("reports") / "_states" / f"{ticker}.json"
+    state_file = Path("reports") / "_states" / f"{ticker.replace(':', '_')}.json"
     if state_file.exists():
         try:
             import json

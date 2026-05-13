@@ -255,7 +255,7 @@ async def trigger_merge_allocate(
     tickers_data = []
     state_dir = Path("reports") / "_states"
     for sym in symbols:
-        state_file = state_dir / f"{sym}.json"
+        state_file = state_dir / f"{sym.replace(':', '_')}.json"
         if state_file.exists():
             try:
                 state = json.loads(state_file.read_text(encoding="utf-8"))
