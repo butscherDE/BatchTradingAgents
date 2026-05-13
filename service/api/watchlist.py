@@ -320,7 +320,8 @@ def _get_report_times(symbols: list[str]) -> dict[str, str]:
     now = time.time()
     result = {}
     for sym in symbols:
-        state_file = state_dir / f"{sym}.json"
+        fs_sym = sym.replace(":", "_")
+        state_file = state_dir / f"{fs_sym}.json"
         if state_file.exists():
             mtime = state_file.stat().st_mtime
             delta = now - mtime

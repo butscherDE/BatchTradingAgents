@@ -7,10 +7,9 @@ from typing import Annotated
 
 SavePathType = Annotated[str, "File path to save data. If None, data is not saved."]
 
-# Tickers can contain letters, digits, dot, dash, underscore, and caret
-# (for index symbols like ^GSPC). Anything else is rejected so the value
-# never escapes a containing directory when interpolated into a path.
-_TICKER_PATH_RE = re.compile(r"^[A-Za-z0-9._\-\^]+$")
+# Tickers can contain letters, digits, dot, dash, underscore, caret,
+# and colon (for exchange-prefixed symbols like TSX:KNT).
+_TICKER_PATH_RE = re.compile(r"^[A-Za-z0-9._\-\^:]+$")
 
 
 def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
@@ -22,8 +21,9 @@ def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
     ``"../../../etc/foo"`` flows into ``os.path.join`` / ``Path /`` and
     escapes the configured cache, checkpoint, or results directory.
 
-    Returns ``value`` unchanged when it matches the allowed pattern; raises
-    ``ValueError`` otherwise.
+    Returns a filesystem-safe version of the ticker (colons replaced with
+    underscores). Raises ``ValueError`` if the value contains dangerous
+    characters.
     """
     if not isinstance(value, str) or not value:
         raise ValueError(f"ticker must be a non-empty string, got {value!r}")
@@ -38,7 +38,7 @@ def safe_ticker_component(value: str, *, max_len: int = 32) -> str:
     # value that's only dots.
     if set(value) == {"."}:
         raise ValueError(f"ticker cannot consist solely of dots: {value!r}")
-    return value
+    return value.replace(":", "_")
 
 
 def save_output(data: pd.DataFrame, tag: str, save_path: SavePathType = None) -> None:
