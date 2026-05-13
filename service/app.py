@@ -701,9 +701,11 @@ async def _handle_discovery_result(data: dict):
     """Process a watchlist discovery result — maybe add ticker to specific account."""
     from service.api.ws import broadcast
     from service.db.models import WatchlistTicker, WatchlistEvent
+    from service.api.watchlist import _normalize_symbol
 
     result = data.get("result", {})
-    ticker = data.get("ticker")
+    raw_ticker = data.get("ticker")
+    ticker = _normalize_symbol(raw_ticker) if raw_ticker else None
     should_add = result.get("add", False)
     reasoning = result.get("reasoning", "")
 

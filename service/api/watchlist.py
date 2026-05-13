@@ -13,6 +13,14 @@ from service.db.models import WatchlistTicker, WatchlistEvent
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
 
 
+def _normalize_symbol(symbol: str) -> str:
+    """Strip exchange prefix (e.g. 'TSX:KNT' -> 'KNT') and clean up."""
+    s = symbol.strip().upper()
+    if ":" in s:
+        s = s.split(":")[-1]
+    return s
+
+
 async def get_session():
     from service.app import get_db_session
     async with get_db_session() as session:
@@ -70,7 +78,7 @@ async def list_watchlist(
 
 @router.post("", response_model=WatchlistTickerResponse, status_code=201)
 async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get_session)):
-    symbol = body.symbol.upper().strip()
+    symbol = _normalize_symbol(body.symbol)
     account_id = body.account_id.strip()
     if not symbol:
         raise HTTPException(status_code=400, detail="Symbol required")
@@ -163,7 +171,7 @@ async def remove_ticker(
     reason: str = Query(default="manual removal"),
     session: AsyncSession = Depends(get_session),
 ):
-    symbol = symbol.upper().strip()
+    symbol = _normalize_symbol(symbol)
     result = await session.execute(
         select(WatchlistTicker).where(
             WatchlistTicker.account_id == account_id,
