@@ -40,6 +40,9 @@ interface MergeSchedule {
   days: number[]
   times: string[]
   enabled: boolean
+  merge_checks: number
+  allocation_checks: number
+  provider: string
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -116,6 +119,9 @@ export default function Proposals() {
   const [schedAccount, setSchedAccount] = useState('')
   const [schedDays, setSchedDays] = useState<number[]>([0, 1, 2, 3, 4])
   const [schedTimes, setSchedTimes] = useState('06:00, 09:00, 12:00')
+  const [schedMergeChecks, setSchedMergeChecks] = useState(2)
+  const [schedAllocChecks, setSchedAllocChecks] = useState(2)
+  const [schedProvider, setSchedProvider] = useState('')
 
   const { data: schedules = [], refetch: refetchSchedules } = useQuery({
     queryKey: ['mergeSchedules'],
@@ -182,157 +188,198 @@ export default function Proposals() {
         <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 16, textTransform: 'uppercase' }}>Merge & Allocation</h3>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 32 }}>
-          {/* Manual trigger */}
-          <div>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Run Now</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>Account</span>
-              <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ fontSize: 13 }}>
-                <option value="">Select account...</option>
-                {accounts.map((a: AccountSummary) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
+          {/* Left: Run Now + Schedule form */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* Run Now */}
+            <div>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Run Now</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>Account</span>
+                <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ fontSize: 13 }}>
+                  <option value="">Select account...</option>
+                  {accounts.map((a: AccountSummary) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
 
-              <span style={{ fontSize: 13 }}>Merge checks</span>
-              <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
-                <option value={0}>0</option>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-              </select>
+                <span style={{ fontSize: 13 }}>Merge checks</span>
+                <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
 
-              <span style={{ fontSize: 13 }}>Alloc checks</span>
-              <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
-                <option value={0}>0</option>
-                <option value={1}>1</option>
-                <option value={2}>2</option>
-                <option value={3}>3</option>
-              </select>
+                <span style={{ fontSize: 13 }}>Alloc checks</span>
+                <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
 
-              <span style={{ fontSize: 13 }}>Provider</span>
-              <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ fontSize: 13 }}>
-                <option value="">Auto (priority)</option>
-                {taskStats?.providers?.map(p => (
-                  <option key={p.name} value={p.name}>{p.name}</option>
-                ))}
-              </select>
+                <span style={{ fontSize: 13 }}>Provider</span>
+                <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ fontSize: 13 }}>
+                  <option value="">Auto (priority)</option>
+                  {taskStats?.providers?.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={() => triggerMutation.mutate()}
+                disabled={triggerMutation.isPending || !selectedAccount}
+                style={{ marginTop: 12 }}
+              >
+                {triggerMutation.isPending ? 'Submitting...' : 'Run'}
+              </button>
+              {triggerMutation.isError && (
+                <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
+                  {(triggerMutation.error as Error).message}
+                </p>
+              )}
             </div>
-            <button
-              onClick={() => triggerMutation.mutate()}
-              disabled={triggerMutation.isPending || !selectedAccount}
-              style={{ marginTop: 12 }}
-            >
-              {triggerMutation.isPending ? 'Submitting...' : 'Run'}
-            </button>
-            {triggerMutation.isError && (
-              <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
-                {(triggerMutation.error as Error).message}
-              </p>
-            )}
+
+            {/* Schedule form */}
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Schedule (UTC)</span>
+              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
+                <span style={{ fontSize: 13 }}>Account</span>
+                <select
+                  value={schedAccount}
+                  onChange={e => {
+                    setSchedAccount(e.target.value)
+                    const existing = schedules.find(s => s.account_id === e.target.value)
+                    if (existing) {
+                      setSchedDays(existing.days)
+                      setSchedTimes(existing.times.join(', '))
+                      setSchedMergeChecks(existing.merge_checks ?? 2)
+                      setSchedAllocChecks(existing.allocation_checks ?? 2)
+                      setSchedProvider(existing.provider ?? '')
+                    } else {
+                      setSchedDays([0, 1, 2, 3, 4])
+                      setSchedTimes('06:00, 09:00, 12:00')
+                      setSchedMergeChecks(2)
+                      setSchedAllocChecks(2)
+                      setSchedProvider('')
+                    }
+                  }}
+                  style={{ fontSize: 13 }}
+                >
+                  <option value="">Select account...</option>
+                  {accounts.map((a: AccountSummary) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+
+                <span style={{ fontSize: 13 }}>Days</span>
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {DAY_LABELS.map((label, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                      style={{
+                        fontSize: 11,
+                        padding: '4px 7px',
+                        background: schedDays.includes(i) ? 'var(--accent)' : 'transparent',
+                        color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
+                        border: 'none',
+                        borderRadius: 3,
+                        cursor: 'pointer',
+                        fontWeight: schedDays.includes(i) ? 600 : 400,
+                      }}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                <span style={{ fontSize: 13 }}>Times</span>
+                <input
+                  type="text"
+                  value={schedTimes}
+                  onChange={e => setSchedTimes(e.target.value)}
+                  placeholder="06:00, 09:00, 12:00"
+                  style={{ fontSize: 13, padding: '5px 8px' }}
+                />
+
+                <span style={{ fontSize: 13 }}>Merge checks</span>
+                <select value={schedMergeChecks} onChange={e => setSchedMergeChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+
+                <span style={{ fontSize: 13 }}>Alloc checks</span>
+                <select value={schedAllocChecks} onChange={e => setSchedAllocChecks(Number(e.target.value))} style={{ fontSize: 13 }}>
+                  <option value={0}>0</option>
+                  <option value={1}>1</option>
+                  <option value={2}>2</option>
+                  <option value={3}>3</option>
+                </select>
+
+                <span style={{ fontSize: 13 }}>Provider</span>
+                <select value={schedProvider} onChange={e => setSchedProvider(e.target.value)} style={{ fontSize: 13 }}>
+                  <option value="">Auto (priority)</option>
+                  {taskStats?.providers?.map(p => (
+                    <option key={p.name} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+                <button
+                  onClick={() => {
+                    const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
+                    saveScheduleMutation.mutate({
+                      account_id: schedAccount, days: schedDays, times, enabled: true,
+                      merge_checks: schedMergeChecks, allocation_checks: schedAllocChecks, provider: schedProvider,
+                    })
+                  }}
+                  disabled={!schedAccount || !schedTimes.trim() || saveScheduleMutation.isPending}
+                >
+                  {saveScheduleMutation.isPending ? 'Saving...' : 'Save'}
+                </button>
+                {schedAccount && schedules.some(s => s.account_id === schedAccount) && (
+                  <button
+                    onClick={() => deleteScheduleMutation.mutate(schedAccount)}
+                    style={{ background: 'var(--red)' }}
+                  >
+                    Delete
+                  </button>
+                )}
+                {schedSaved && (
+                  <span style={{ color: 'var(--green)', fontSize: 12 }}>Saved.</span>
+                )}
+              </div>
+              {saveScheduleMutation.isError && (
+                <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
+                  {(saveScheduleMutation.error as Error).message}
+                </p>
+              )}
+            </div>
           </div>
 
-          {/* Schedule config */}
+          {/* Right: Active schedules list */}
           <div>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Schedule (UTC)</span>
-            <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '10px 12px', alignItems: 'center' }}>
-              <span style={{ fontSize: 13 }}>Account</span>
-              <select
-                value={schedAccount}
-                onChange={e => {
-                  setSchedAccount(e.target.value)
-                  const existing = schedules.find(s => s.account_id === e.target.value)
-                  if (existing) {
-                    setSchedDays(existing.days)
-                    setSchedTimes(existing.times.join(', '))
-                  } else {
-                    setSchedDays([0, 1, 2, 3, 4])
-                    setSchedTimes('06:00, 09:00, 12:00')
-                  }
-                }}
-                style={{ fontSize: 13 }}
-              >
-                <option value="">Select account...</option>
-                {accounts.map((a: AccountSummary) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-
-              <span style={{ fontSize: 13 }}>Days</span>
-              <div style={{ display: 'flex', gap: 4 }}>
-                {DAY_LABELS.map((label, i) => (
-                  <button
-                    key={i}
-                    onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase', display: 'block', marginBottom: 12 }}>Active Schedules</span>
+            {schedules.length === 0 ? (
+              <p style={{ color: 'var(--text-dim)', fontSize: 13 }}>No schedules configured.</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {schedules.map(s => (
+                  <div
+                    key={s.account_id}
                     style={{
-                      fontSize: 11,
-                      padding: '4px 7px',
-                      background: schedDays.includes(i) ? 'var(--accent)' : 'transparent',
-                      color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
-                      border: 'none',
-                      borderRadius: 3,
-                      cursor: 'pointer',
-                      fontWeight: schedDays.includes(i) ? 600 : 400,
+                      padding: '10px 12px',
+                      borderRadius: 6,
+                      background: 'var(--bg-secondary)',
+                      opacity: s.enabled ? 1 : 0.5,
+                      border: schedAccount === s.account_id ? '1px solid var(--accent)' : '1px solid transparent',
                     }}
                   >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <span style={{ fontSize: 13 }}>Times</span>
-              <input
-                type="text"
-                value={schedTimes}
-                onChange={e => setSchedTimes(e.target.value)}
-                placeholder="06:00, 09:00, 12:00"
-                style={{ fontSize: 13, padding: '5px 8px' }}
-              />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
-              <button
-                onClick={() => {
-                  const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
-                  saveScheduleMutation.mutate({ account_id: schedAccount, days: schedDays, times, enabled: true })
-                }}
-                disabled={!schedAccount || !schedTimes.trim() || saveScheduleMutation.isPending}
-              >
-                {saveScheduleMutation.isPending ? 'Saving...' : 'Save'}
-              </button>
-              {schedAccount && schedules.some(s => s.account_id === schedAccount) && (
-                <button
-                  onClick={() => deleteScheduleMutation.mutate(schedAccount)}
-                  style={{ background: 'var(--red)' }}
-                >
-                  Delete
-                </button>
-              )}
-              {schedSaved && (
-                <span style={{ color: 'var(--green)', fontSize: 12 }}>Saved.</span>
-              )}
-            </div>
-            {saveScheduleMutation.isError && (
-              <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 6 }}>
-                {(saveScheduleMutation.error as Error).message}
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Existing schedules */}
-        {schedules.length > 0 && (
-          <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-            <table style={{ fontSize: 13 }}>
-              <thead>
-                <tr><th>Account</th><th>Days</th><th>Times</th><th>Status</th><th></th></tr>
-              </thead>
-              <tbody>
-                {schedules.map(s => (
-                  <tr key={s.account_id} style={{ opacity: s.enabled ? 1 : 0.5 }}>
-                    <td style={{ fontWeight: 600 }}>{s.account_id}</td>
-                    <td>{s.days.map(d => DAY_LABELS[d]).join(', ')}</td>
-                    <td>{s.times.join(', ')}</td>
-                    <td>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{s.account_id}</span>
                       <span
                         className={`badge ${s.enabled ? 'badge-completed' : 'badge-failed'}`}
                         style={{ cursor: 'pointer' }}
@@ -340,25 +387,40 @@ export default function Proposals() {
                       >
                         {s.enabled ? 'active' : 'paused'}
                       </span>
-                    </td>
-                    <td>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-dim)', marginBottom: 4 }}>
+                      {s.days.map(d => DAY_LABELS[d]).join(', ')} at {s.times.join(', ')}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
+                      Merge: {s.merge_checks ?? 2}x · Alloc: {s.allocation_checks ?? 2}x · Provider: {s.provider || 'auto'}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
                       <button
                         onClick={() => {
                           setSchedAccount(s.account_id)
                           setSchedDays(s.days)
                           setSchedTimes(s.times.join(', '))
+                          setSchedMergeChecks(s.merge_checks ?? 2)
+                          setSchedAllocChecks(s.allocation_checks ?? 2)
+                          setSchedProvider(s.provider ?? '')
                         }}
                         style={{ fontSize: 11, padding: '3px 8px' }}
                       >
                         edit
                       </button>
-                    </td>
-                  </tr>
+                      <button
+                        onClick={() => deleteScheduleMutation.mutate(s.account_id)}
+                        style={{ fontSize: 11, padding: '3px 8px', background: 'var(--red)' }}
+                      >
+                        delete
+                      </button>
+                    </div>
+                  </div>
                 ))}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
       {pending.length > 0 && (

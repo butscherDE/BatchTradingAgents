@@ -323,6 +323,9 @@ class MergeSchedule(BaseModel):
     days: list[int]  # 0=Mon, 1=Tue, ..., 6=Sun
     times: list[str]  # ["06:00", "09:00", "12:00"]
     enabled: bool = True
+    merge_checks: int = 2
+    allocation_checks: int = 2
+    provider: str = ""
 
 
 @router.get("/schedule", response_model=list[MergeSchedule])
@@ -334,7 +337,7 @@ async def get_schedules():
 @router.put("/schedule")
 async def set_schedule(schedule: MergeSchedule):
     from service.app import set_merge_schedule
-    set_merge_schedule(schedule.account_id, schedule.days, schedule.times, schedule.enabled)
+    set_merge_schedule(schedule.account_id, schedule.model_dump(exclude={"account_id"}))
     return {"status": "ok", "schedule": schedule}
 
 

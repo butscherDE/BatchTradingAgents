@@ -1212,8 +1212,8 @@ def get_merge_schedules() -> list[dict]:
     ]
 
 
-def set_merge_schedule(account_id: str, days: list[int], times: list[str], enabled: bool = True):
-    _merge_schedules[account_id] = {"days": days, "times": times, "enabled": enabled}
+def set_merge_schedule(account_id: str, data: dict):
+    _merge_schedules[account_id] = data
     _save_schedules()
 
 
@@ -1259,12 +1259,17 @@ async def _merge_scheduler():
                         continue
                     logger.info(f"Merge schedule fired for {account_id} at {current_time} UTC")
                     try:
-                        await _trigger_merge_for_account(account_id, acct)
+                        await _trigger_merge_for_account(
+                            account_id, acct,
+                            merge_checks=sched.get("merge_checks"),
+                            allocation_checks=sched.get("allocation_checks"),
+                            provider=sched.get("provider") or None,
+                        )
                     except Exception as e:
                         logger.error(f"Scheduled merge failed for {account_id}: {e}")
 
 
-async def _trigger_merge_for_account(account_id: str, acct):
+async def _trigger_merge_for_account(account_id: str, acct, merge_checks: int = None, allocation_checks: int = None, provider: str = None):
     """Trigger a merge+allocate for an account (same logic as the /trigger endpoint)."""
     from service.db.models import GpuTask, TaskStatus, WatchlistTicker
     from sqlalchemy import select
@@ -1310,16 +1315,22 @@ async def _trigger_merge_for_account(account_id: str, acct):
     except Exception:
         pass
 
+    payload = {
+        "account_id": account_id,
+        "tickers_data": tickers_data,
+        "strategy": acct.strategy,
+        "portfolio": portfolio,
+    }
+    if merge_checks is not None:
+        payload["merge_checks_override"] = merge_checks
+    if allocation_checks is not None:
+        payload["allocation_checks_override"] = allocation_checks
+
     task_id = await _scheduler.submit(TaskSpec(
         model_tier="deep",
         task_type="merge_and_allocate",
-        payload={
-            "account_id": account_id,
-            "tickers_data": tickers_data,
-            "strategy": acct.strategy,
-            "portfolio": portfolio,
-        },
-    ))
+        payload=payload,
+    ), provider=provider)
 
     async with get_db_session() as session:
         session.add(GpuTask(
