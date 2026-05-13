@@ -26,6 +26,7 @@ _start_time: float = 0
 _debouncer: MergeDebouncer | None = None
 _latest_reports: dict[str, dict] = {}  # ticker -> latest analysis result
 _orphaned_tasks: list = []  # tasks recovered from crash
+_merge_schedules: dict[str, dict] = {}  # account_id -> {days, times, enabled}
 
 _news_source_health: dict = {
     "alpaca": {
@@ -193,6 +194,9 @@ async def lifespan(app: FastAPI):
     # Daily prune scheduler
     prune_task = asyncio.create_task(_prune_scheduler())
 
+    # Merge+allocate scheduler
+    merge_sched_task = asyncio.create_task(_merge_scheduler())
+
     # yfinance periodic news poller
     yfinance_task = None
     if _config.polling.yfinance_enabled:
@@ -203,6 +207,7 @@ async def lifespan(app: FastAPI):
 
     # Shutdown
     prune_task.cancel()
+    merge_sched_task.cancel()
     if yfinance_task:
         yfinance_task.cancel()
 
@@ -1174,6 +1179,160 @@ async def _prune_scheduler():
             except Exception as e:
                 logger.error(f"Prune failed for {account_name}: {e}")
 
+
+# --- Merge schedule ---
+
+_SCHEDULE_FILE = "data/merge_schedules.json"
+
+
+def _load_schedules():
+    import json
+    from pathlib import Path
+    global _merge_schedules
+    p = Path(_SCHEDULE_FILE)
+    if p.exists():
+        try:
+            _merge_schedules = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            _merge_schedules = {}
+
+
+def _save_schedules():
+    import json
+    from pathlib import Path
+    p = Path(_SCHEDULE_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(_merge_schedules, indent=2), encoding="utf-8")
+
+
+def get_merge_schedules() -> list[dict]:
+    return [
+        {"account_id": k, **v}
+        for k, v in _merge_schedules.items()
+    ]
+
+
+def set_merge_schedule(account_id: str, days: list[int], times: list[str], enabled: bool = True):
+    _merge_schedules[account_id] = {"days": days, "times": times, "enabled": enabled}
+    _save_schedules()
+
+
+def delete_merge_schedule(account_id: str):
+    _merge_schedules.pop(account_id, None)
+    _save_schedules()
+
+
+async def _merge_scheduler():
+    """Check every 60s if a scheduled merge+allocate should fire."""
+    _load_schedules()
+    fired_today: dict[str, set] = {}
+    last_date = ""
+
+    while True:
+        await asyncio.sleep(60)
+
+        if not _config or not _scheduler:
+            continue
+
+        now = datetime.datetime.utcnow()
+        weekday = now.weekday()  # 0=Mon
+        current_time = now.strftime("%H:%M")
+        date_key = now.strftime("%Y-%m-%d")
+
+        if date_key != last_date:
+            fired_today = {}
+            last_date = date_key
+
+        for account_id, sched in _merge_schedules.items():
+            if not sched.get("enabled", True):
+                continue
+            if weekday not in sched.get("days", []):
+                continue
+            if account_id not in fired_today:
+                fired_today[account_id] = set()
+
+            for scheduled_time in sched.get("times", []):
+                if scheduled_time == current_time and scheduled_time not in fired_today[account_id]:
+                    fired_today[account_id].add(scheduled_time)
+                    acct = _config.accounts.get(account_id)
+                    if not acct:
+                        continue
+                    logger.info(f"Merge schedule fired for {account_id} at {current_time} UTC")
+                    try:
+                        await _trigger_merge_for_account(account_id, acct)
+                    except Exception as e:
+                        logger.error(f"Scheduled merge failed for {account_id}: {e}")
+
+
+async def _trigger_merge_for_account(account_id: str, acct):
+    """Trigger a merge+allocate for an account (same logic as the /trigger endpoint)."""
+    from service.db.models import GpuTask, TaskStatus, WatchlistTicker
+    from sqlalchemy import select
+    from pathlib import Path
+    import json as json_mod
+
+    async with get_db_session() as session:
+        result = await session.execute(
+            select(WatchlistTicker.symbol).where(
+                WatchlistTicker.account_id == account_id,
+                WatchlistTicker.active == 1,
+            )
+        )
+        symbols = list(result.scalars().all())
+
+    tickers_data = []
+    state_dir = Path("reports") / "_states"
+    for sym in symbols:
+        state_file = state_dir / f"{sym.replace(':', '_')}.json"
+        if state_file.exists():
+            try:
+                state = json_mod.loads(state_file.read_text(encoding="utf-8"))
+                decision_raw = state.get("final_trade_decision", "")
+                decision = _extract_decision(decision_raw)
+                tickers_data.append({
+                    "ticker": sym,
+                    "decision": decision,
+                    "final_state": state,
+                })
+            except Exception:
+                pass
+
+    if not tickers_data:
+        logger.info(f"Scheduled merge for {account_id}: no reports available, skipping")
+        return
+
+    portfolio = None
+    try:
+        from cli.alpaca_client import create_client, fetch_portfolio
+        client = create_client(acct.api_key, acct.api_secret, paper=acct.is_paper)
+        port, _, prices, _ = fetch_portfolio(client)
+        portfolio = {"holdings": port.holdings, "cash": port.cash, "prices": prices}
+    except Exception:
+        pass
+
+    task_id = await _scheduler.submit(TaskSpec(
+        model_tier="deep",
+        task_type="merge_and_allocate",
+        payload={
+            "account_id": account_id,
+            "tickers_data": tickers_data,
+            "strategy": acct.strategy,
+            "portfolio": portfolio,
+        },
+    ))
+
+    async with get_db_session() as session:
+        session.add(GpuTask(
+            task_id=task_id,
+            model_tier="deep",
+            task_type="merge_and_allocate",
+            priority=1,
+            status=TaskStatus.queued,
+            payload={"account_id": account_id, "tickers": [t["ticker"] for t in tickers_data]},
+        ))
+        await session.commit()
+
+    logger.info(f"Scheduled merge submitted for {account_id}: {len(tickers_data)} tickers, task_id={task_id}")
 
 async def _run_prune_for_account(account_name: str, acct):
     """Submit a single rank-and-prune task for an account's watchlist."""

@@ -35,6 +35,15 @@ interface ProposalDetail {
   execution_results: { ticker: string; side?: string; order_id?: string; status?: string; error?: string }[] | null
 }
 
+interface MergeSchedule {
+  account_id: string
+  days: number[]
+  times: string[]
+  enabled: boolean
+}
+
+const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
 export default function Proposals() {
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [supersededWarning, setSupersededWarning] = useState<number | null>(null)
@@ -102,6 +111,44 @@ export default function Proposals() {
   const [allocChecks, setAllocChecks] = useState(1)
   const [selectedAccount, setSelectedAccount] = useState('')
   const [selectedProvider, setSelectedProvider] = useState('')
+
+  // Schedule state
+  const [schedAccount, setSchedAccount] = useState('')
+  const [schedDays, setSchedDays] = useState<number[]>([0, 1, 2, 3, 4])
+  const [schedTimes, setSchedTimes] = useState('06:00, 09:00, 12:00')
+
+  const { data: schedules = [], refetch: refetchSchedules } = useQuery({
+    queryKey: ['mergeSchedules'],
+    queryFn: () => fetchJson<MergeSchedule[]>('/api/proposals/schedule'),
+  })
+
+  const saveScheduleMutation = useMutation({
+    mutationFn: (sched: MergeSchedule) =>
+      fetch('/api/proposals/schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sched),
+      }).then(async r => { if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json() }),
+    onSuccess: () => refetchSchedules(),
+  })
+
+  const deleteScheduleMutation = useMutation({
+    mutationFn: (accountId: string) =>
+      fetch(`/api/proposals/schedule/${accountId}`, { method: 'DELETE' }).then(async r => {
+        if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json()
+      }),
+    onSuccess: () => refetchSchedules(),
+  })
+
+  const toggleScheduleMutation = useMutation({
+    mutationFn: (sched: MergeSchedule) =>
+      fetch('/api/proposals/schedule', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...sched, enabled: !sched.enabled }),
+      }).then(async r => { if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json() }),
+    onSuccess: () => refetchSchedules(),
+  })
 
   const { data: taskStats } = useQuery({
     queryKey: ['taskStats'],
@@ -179,6 +226,102 @@ export default function Proposals() {
         {triggerMutation.isError && (
           <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>
             {(triggerMutation.error as Error).message}
+          </p>
+        )}
+      </div>
+
+      <div className="stat-card" style={{ marginBottom: 24, padding: '16px 20px' }}>
+        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>Merge Schedule (UTC)</h3>
+
+        {schedules.length > 0 && (
+          <table style={{ marginBottom: 16, fontSize: 13 }}>
+            <thead>
+              <tr><th>Account</th><th>Days</th><th>Times</th><th>Status</th><th></th></tr>
+            </thead>
+            <tbody>
+              {schedules.map(s => (
+                <tr key={s.account_id} style={{ opacity: s.enabled ? 1 : 0.5 }}>
+                  <td style={{ fontWeight: 600 }}>{s.account_id}</td>
+                  <td>{s.days.map(d => DAY_LABELS[d]).join(', ')}</td>
+                  <td>{s.times.join(', ')}</td>
+                  <td>
+                    <span
+                      className={`badge ${s.enabled ? 'badge-completed' : 'badge-failed'}`}
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => toggleScheduleMutation.mutate(s)}
+                    >
+                      {s.enabled ? 'active' : 'paused'}
+                    </span>
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => deleteScheduleMutation.mutate(s.account_id)}
+                      style={{ background: 'var(--red)', fontSize: 11, padding: '3px 8px' }}
+                    >
+                      delete
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 400 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
+            <select value={schedAccount} onChange={e => setSchedAccount(e.target.value)} style={{ width: 200, fontSize: 12 }}>
+              <option value="">Select account...</option>
+              {accounts.map((a: AccountSummary) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Days</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {DAY_LABELS.map((label, i) => (
+                <button
+                  key={i}
+                  onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 6px',
+                    background: schedDays.includes(i) ? 'var(--accent)' : 'var(--bg-secondary)',
+                    color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
+                    border: 'none',
+                    borderRadius: 3,
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Times (UTC)</span>
+            <input
+              type="text"
+              value={schedTimes}
+              onChange={e => setSchedTimes(e.target.value)}
+              placeholder="06:00, 09:00, 12:00"
+              style={{ width: 200, fontSize: 12, padding: '4px 8px' }}
+            />
+          </div>
+          <button
+            onClick={() => {
+              const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
+              saveScheduleMutation.mutate({ account_id: schedAccount, days: schedDays, times, enabled: true })
+            }}
+            disabled={!schedAccount || !schedTimes.trim()}
+            style={{ alignSelf: 'flex-start', marginTop: 4 }}
+          >
+            Save Schedule
+          </button>
+        </div>
+        {saveScheduleMutation.isError && (
+          <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>
+            {(saveScheduleMutation.error as Error).message}
           </p>
         )}
       </div>
