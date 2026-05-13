@@ -122,6 +122,8 @@ export default function Proposals() {
     queryFn: () => fetchJson<MergeSchedule[]>('/api/proposals/schedule'),
   })
 
+  const [schedSaved, setSchedSaved] = useState(false)
+
   const saveScheduleMutation = useMutation({
     mutationFn: (sched: MergeSchedule) =>
       fetch('/api/proposals/schedule', {
@@ -129,7 +131,7 @@ export default function Proposals() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sched),
       }).then(async r => { if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') } return r.json() }),
-    onSuccess: () => refetchSchedules(),
+    onSuccess: () => { refetchSchedules(); setSchedSaved(true); setTimeout(() => setSchedSaved(false), 3000) },
   })
 
   const deleteScheduleMutation = useMutation({
@@ -177,152 +179,189 @@ export default function Proposals() {
       <h1>Trade Proposals</h1>
 
       <div className="stat-card" style={{ marginBottom: 24, padding: '16px 20px' }}>
-        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>New Merge & Allocation</h3>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 300 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
-            <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ width: 160, fontSize: 12 }}>
-              <option value="">Select account...</option>
-              {accounts.map((a: AccountSummary) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Merge checks</span>
-            <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
-              <option value={0}>0</option>
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-              <option value={3}>3</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks</span>
-            <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
-              <option value={0}>0</option>
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-              <option value={3}>3</option>
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Provider</span>
-            <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ width: 160, fontSize: 12 }}>
-              <option value="">Auto (priority)</option>
-              {taskStats?.providers?.map(p => (
-                <option key={p.name} value={p.name}>{p.name}</option>
-              ))}
-            </select>
-          </div>
-          <button
-            onClick={() => triggerMutation.mutate()}
-            disabled={triggerMutation.isPending || !selectedAccount}
-            style={{ marginTop: 4, alignSelf: 'flex-start' }}
-          >
-            {triggerMutation.isPending ? 'Submitting...' : 'Run'}
-          </button>
-        </div>
-        {triggerMutation.isError && (
-          <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>
-            {(triggerMutation.error as Error).message}
-          </p>
-        )}
-      </div>
+        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>Merge & Allocation</h3>
 
-      <div className="stat-card" style={{ marginBottom: 24, padding: '16px 20px' }}>
-        <h3 style={{ fontSize: 12, color: 'var(--accent)', marginBottom: 12, textTransform: 'uppercase' }}>Merge Schedule (UTC)</h3>
-
-        {schedules.length > 0 && (
-          <table style={{ marginBottom: 16, fontSize: 13 }}>
-            <thead>
-              <tr><th>Account</th><th>Days</th><th>Times</th><th>Status</th><th></th></tr>
-            </thead>
-            <tbody>
-              {schedules.map(s => (
-                <tr key={s.account_id} style={{ opacity: s.enabled ? 1 : 0.5 }}>
-                  <td style={{ fontWeight: 600 }}>{s.account_id}</td>
-                  <td>{s.days.map(d => DAY_LABELS[d]).join(', ')}</td>
-                  <td>{s.times.join(', ')}</td>
-                  <td>
-                    <span
-                      className={`badge ${s.enabled ? 'badge-completed' : 'badge-failed'}`}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => toggleScheduleMutation.mutate(s)}
-                    >
-                      {s.enabled ? 'active' : 'paused'}
-                    </span>
-                  </td>
-                  <td>
-                    <button
-                      onClick={() => deleteScheduleMutation.mutate(s.account_id)}
-                      style={{ background: 'var(--red)', fontSize: 11, padding: '3px 8px' }}
-                    >
-                      delete
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 400 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
-            <select value={schedAccount} onChange={e => setSchedAccount(e.target.value)} style={{ width: 200, fontSize: 12 }}>
-              <option value="">Select account...</option>
-              {accounts.map((a: AccountSummary) => (
-                <option key={a.id} value={a.id}>{a.name}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Days</span>
-            <div style={{ display: 'flex', gap: 4 }}>
-              {DAY_LABELS.map((label, i) => (
-                <button
-                  key={i}
-                  onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 6px',
-                    background: schedDays.includes(i) ? 'var(--accent)' : 'var(--bg-secondary)',
-                    color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
-                    border: 'none',
-                    borderRadius: 3,
-                  }}
-                >
-                  {label}
-                </button>
-              ))}
+        <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
+          {/* Manual trigger */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 260 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Run Now</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
+              <select value={selectedAccount} onChange={e => setSelectedAccount(e.target.value)} style={{ width: 160, fontSize: 12 }}>
+                <option value="">Select account...</option>
+                {accounts.map((a: AccountSummary) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
             </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Merge checks</span>
+              <select value={mergeChecks} onChange={e => setMergeChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
+                <option value={0}>0</option>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Alloc checks</span>
+              <select value={allocChecks} onChange={e => setAllocChecks(Number(e.target.value))} style={{ width: 160, fontSize: 12 }}>
+                <option value={0}>0</option>
+                <option value={1}>1</option>
+                <option value={2}>2</option>
+                <option value={3}>3</option>
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Provider</span>
+              <select value={selectedProvider} onChange={e => setSelectedProvider(e.target.value)} style={{ width: 160, fontSize: 12 }}>
+                <option value="">Auto (priority)</option>
+                {taskStats?.providers?.map(p => (
+                  <option key={p.name} value={p.name}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={() => triggerMutation.mutate()}
+              disabled={triggerMutation.isPending || !selectedAccount}
+              style={{ marginTop: 4, alignSelf: 'flex-start' }}
+            >
+              {triggerMutation.isPending ? 'Submitting...' : 'Run'}
+            </button>
+            {triggerMutation.isError && (
+              <p style={{ color: 'var(--red)', fontSize: 13 }}>
+                {(triggerMutation.error as Error).message}
+              </p>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Times (UTC)</span>
-            <input
-              type="text"
-              value={schedTimes}
-              onChange={e => setSchedTimes(e.target.value)}
-              placeholder="06:00, 09:00, 12:00"
-              style={{ width: 200, fontSize: 12, padding: '4px 8px' }}
-            />
+
+          {/* Schedule config */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 320 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-dim)', textTransform: 'uppercase' }}>Schedule (UTC)</span>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Account</span>
+              <select
+                value={schedAccount}
+                onChange={e => {
+                  setSchedAccount(e.target.value)
+                  const existing = schedules.find(s => s.account_id === e.target.value)
+                  if (existing) {
+                    setSchedDays(existing.days)
+                    setSchedTimes(existing.times.join(', '))
+                  } else {
+                    setSchedDays([0, 1, 2, 3, 4])
+                    setSchedTimes('06:00, 09:00, 12:00')
+                  }
+                }}
+                style={{ width: 200, fontSize: 12 }}
+              >
+                <option value="">Select account...</option>
+                {accounts.map((a: AccountSummary) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Days</span>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {DAY_LABELS.map((label, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSchedDays(prev => prev.includes(i) ? prev.filter(d => d !== i) : [...prev, i].sort())}
+                    style={{
+                      fontSize: 11,
+                      padding: '3px 6px',
+                      background: schedDays.includes(i) ? 'var(--accent)' : 'var(--bg-secondary)',
+                      color: schedDays.includes(i) ? 'var(--bg)' : 'var(--text-dim)',
+                      border: 'none',
+                      borderRadius: 3,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>Times</span>
+              <input
+                type="text"
+                value={schedTimes}
+                onChange={e => setSchedTimes(e.target.value)}
+                placeholder="06:00, 09:00, 12:00"
+                style={{ width: 200, fontSize: 12, padding: '4px 8px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+              <button
+                onClick={() => {
+                  const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
+                  saveScheduleMutation.mutate({ account_id: schedAccount, days: schedDays, times, enabled: true })
+                }}
+                disabled={!schedAccount || !schedTimes.trim() || saveScheduleMutation.isPending}
+              >
+                {saveScheduleMutation.isPending ? 'Saving...' : 'Save'}
+              </button>
+              {schedAccount && schedules.some(s => s.account_id === schedAccount) && (
+                <button
+                  onClick={() => deleteScheduleMutation.mutate(schedAccount)}
+                  style={{ background: 'var(--red)' }}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+            {schedSaved && (
+              <p style={{ color: 'var(--green)', fontSize: 12, margin: 0 }}>Schedule saved.</p>
+            )}
+            {saveScheduleMutation.isError && (
+              <p style={{ color: 'var(--red)', fontSize: 12, margin: 0 }}>
+                {(saveScheduleMutation.error as Error).message}
+              </p>
+            )}
           </div>
-          <button
-            onClick={() => {
-              const times = schedTimes.split(',').map(t => t.trim()).filter(Boolean)
-              saveScheduleMutation.mutate({ account_id: schedAccount, days: schedDays, times, enabled: true })
-            }}
-            disabled={!schedAccount || !schedTimes.trim()}
-            style={{ alignSelf: 'flex-start', marginTop: 4 }}
-          >
-            Save Schedule
-          </button>
         </div>
-        {saveScheduleMutation.isError && (
-          <p style={{ color: 'var(--red)', fontSize: 13, marginTop: 8 }}>
-            {(saveScheduleMutation.error as Error).message}
-          </p>
+
+        {/* Existing schedules */}
+        {schedules.length > 0 && (
+          <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+            <table style={{ fontSize: 13 }}>
+              <thead>
+                <tr><th>Account</th><th>Days</th><th>Times</th><th>Status</th><th></th></tr>
+              </thead>
+              <tbody>
+                {schedules.map(s => (
+                  <tr key={s.account_id} style={{ opacity: s.enabled ? 1 : 0.5 }}>
+                    <td style={{ fontWeight: 600 }}>{s.account_id}</td>
+                    <td>{s.days.map(d => DAY_LABELS[d]).join(', ')}</td>
+                    <td>{s.times.join(', ')}</td>
+                    <td>
+                      <span
+                        className={`badge ${s.enabled ? 'badge-completed' : 'badge-failed'}`}
+                        style={{ cursor: 'pointer' }}
+                        onClick={() => toggleScheduleMutation.mutate(s)}
+                      >
+                        {s.enabled ? 'active' : 'paused'}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => {
+                          setSchedAccount(s.account_id)
+                          setSchedDays(s.days)
+                          setSchedTimes(s.times.join(', '))
+                        }}
+                        style={{ fontSize: 11, padding: '3px 8px', marginRight: 4 }}
+                      >
+                        edit
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
