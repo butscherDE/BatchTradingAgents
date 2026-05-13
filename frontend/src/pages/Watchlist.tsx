@@ -14,6 +14,7 @@ interface WatchlistTicker {
   removed_at: string | null
   remove_reason: string | null
   active: boolean
+  last_report_ago: string | null
 }
 
 export default function Watchlist() {
@@ -228,6 +229,7 @@ export default function Watchlist() {
               <th>Symbol</th>
               <th>Added By</th>
               <th>Added</th>
+              <th>Last Report</th>
               <th>Status</th>
               <th></th>
             </tr>
@@ -255,6 +257,7 @@ export default function Watchlist() {
                   </span>
                 </td>
                 <td style={{ fontSize: 12 }}>{parseUtc(t.added_at).toLocaleDateString()}</td>
+                <td style={{ fontSize: 12, color: 'var(--text-dim)' }}>{t.last_report_ago || '—'}</td>
                 <td>
                   {t.active ? (
                     <span className="badge badge-completed">active</span>

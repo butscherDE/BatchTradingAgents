@@ -28,6 +28,7 @@ class WatchlistTickerResponse(BaseModel):
     removed_at: Optional[datetime.datetime] = None
     remove_reason: Optional[str] = None
     active: bool
+    last_report_ago: Optional[str] = None
 
 
 class AddTickerRequest(BaseModel):
@@ -48,6 +49,9 @@ async def list_watchlist(
         query = query.where(WatchlistTicker.active == 1)
     result = await session.execute(query)
     tickers = result.scalars().all()
+
+    report_times = _get_report_times([t.symbol for t in tickers])
+
     return [
         WatchlistTickerResponse(
             id=t.id,
@@ -58,6 +62,7 @@ async def list_watchlist(
             removed_at=t.removed_at,
             remove_reason=t.remove_reason,
             active=bool(t.active),
+            last_report_ago=report_times.get(t.symbol),
         )
         for t in tickers
     ]
@@ -294,6 +299,40 @@ async def trigger_analysis(
     await session.commit()
 
     return {"submitted": submitted, "count": len(submitted)}
+
+
+def _get_report_times(symbols: list[str]) -> dict[str, str]:
+    from pathlib import Path
+    import time
+
+    state_dir = Path("reports") / "_states"
+    if not state_dir.exists():
+        return {}
+
+    now = time.time()
+    result = {}
+    for sym in symbols:
+        state_file = state_dir / f"{sym}.json"
+        if state_file.exists():
+            mtime = state_file.stat().st_mtime
+            delta = now - mtime
+            result[sym] = _format_relative_time(delta)
+    return result
+
+
+def _format_relative_time(seconds: float) -> str:
+    if seconds < 60:
+        n = int(seconds)
+        return f"{n}s ago"
+    elif seconds < 3600:
+        n = int(seconds / 60)
+        return f"{n}m ago"
+    elif seconds < 86400:
+        n = int(seconds / 3600)
+        return f"{n}h ago"
+    else:
+        n = int(seconds / 86400)
+        return f"{n}d ago"
 
 
 def _validate_ticker(symbol: str) -> bool:
