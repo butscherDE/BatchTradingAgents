@@ -21,6 +21,9 @@ def _get_llm(config: dict):
     elif provider == "anthropic" and config.get("anthropic_effort"):
         llm_kwargs["effort"] = config["anthropic_effort"]
 
+    if config.get("llm_timeout"):
+        llm_kwargs["timeout"] = config["llm_timeout"]
+
     client = create_llm_client(
         provider=config["llm_provider"],
         model=config["deep_think_llm"],
