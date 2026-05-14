@@ -153,6 +153,9 @@ class TradingAgentsGraph:
             if effort:
                 kwargs["effort"] = effort
 
+        if self.config.get("llm_timeout"):
+            kwargs["timeout"] = self.config["llm_timeout"]
+
         return kwargs
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
