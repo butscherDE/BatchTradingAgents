@@ -8,6 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from service import clock
+
 from service.db.models import WatchlistTicker, WatchlistEvent
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"])
@@ -112,7 +114,7 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
         ticker.active = 1
         ticker.removed_at = None
         ticker.remove_reason = None
-        ticker.added_at = datetime.datetime.utcnow()
+        ticker.added_at = clock.now()
         ticker.added_by = "manual"
         await session.commit()
         await session.refresh(ticker)
@@ -121,7 +123,7 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
             account_id=account_id,
             symbol=symbol,
             added_by="manual",
-            added_at=datetime.datetime.utcnow(),
+            added_at=clock.now(),
             active=1,
         )
         session.add(ticker)
@@ -184,7 +186,7 @@ async def remove_ticker(
         raise HTTPException(status_code=404, detail=f"{symbol} not on active watchlist for {account_id}")
 
     ticker.active = 0
-    ticker.removed_at = datetime.datetime.utcnow()
+    ticker.removed_at = clock.now()
     ticker.remove_reason = reason
     session.add(WatchlistEvent(
         account_id=account_id, symbol=symbol, action="removed", trigger="manual", reasoning=reason,

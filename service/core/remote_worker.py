@@ -11,6 +11,7 @@ from pathlib import Path
 
 import redis.asyncio as aioredis
 
+from service import clock
 from service.config import load_config, ServiceConfig, ProviderConfig
 from service.core.llm_adapter import call_llm_async
 from service.metrics import record_task_completed, record_token_usage, record_queue_depth, record_worker_utilization
@@ -96,7 +97,7 @@ class RemoteWorker:
 
         await self._publish_status("executing", f"{task_type} for {ticker or 'N/A'}")
 
-        started_at = datetime.datetime.utcnow().isoformat()
+        started_at = clock.now().isoformat()
 
         await self._push_result({
             "task_id": task_id,
@@ -108,7 +109,7 @@ class RemoteWorker:
 
         try:
             result = await self._dispatch(task_type, task.get("payload", {}))
-            completed_at = datetime.datetime.utcnow().isoformat()
+            completed_at = clock.now().isoformat()
             await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
@@ -122,7 +123,7 @@ class RemoteWorker:
             record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "completed", duration)
         except Exception as e:
             error_detail = f"{type(e).__name__}: {e}\n{traceback.format_exc()[-500:]}"
-            completed_at = datetime.datetime.utcnow().isoformat()
+            completed_at = clock.now().isoformat()
             await self._push_result({
                 "task_id": task_id,
                 "task_type": task_type,
@@ -459,7 +460,7 @@ class RemoteWorker:
             "task_count": self._task_count,
             "model_switches": 0,
             "provider": self.provider_name,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": clock.now().isoformat(),
         }
         await self._redis.set(self._status_key, json.dumps(status))
         await self._redis.publish(STATUS_CHANNEL, json.dumps(status))

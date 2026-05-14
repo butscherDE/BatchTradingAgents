@@ -10,6 +10,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from service import clock
 from service.config import ServiceConfig, load_config
 from service.core.gpu_scheduler import GpuScheduler, TaskSpec
 from service.core.debounce import MergeDebouncer
@@ -233,7 +234,7 @@ async def _handle_news_article(article: dict):
 
     if article.get("alpaca_id"):
         _news_source_health["alpaca"]["status"] = "connected"
-        _news_source_health["alpaca"]["last_message_at"] = datetime.datetime.utcnow().isoformat()
+        _news_source_health["alpaca"]["last_message_at"] = clock.now().isoformat()
 
     # Skip excluded tickers entirely
     if _config and _config.watchlist.exclude:
@@ -281,7 +282,7 @@ async def _handle_news_article(article: dict):
                 datetime.datetime.fromisoformat(article["published_at"])
                 if article.get("published_at") else None
             ),
-            received_at=datetime.datetime.utcnow(),
+            received_at=clock.now(),
             status=InvestigationStatus.queued,
         )
         session.add(db_article)
@@ -748,7 +749,7 @@ async def _handle_discovery_result(data: dict):
                 row.removed_at = None
                 row.remove_reason = None
                 row.added_by = "auto_discovery"
-                row.added_at = datetime.datetime.utcnow()
+                row.added_at = clock.now()
                 session.add(WatchlistEvent(
                     account_id=account_id,
                     symbol=ticker.upper(),
@@ -765,7 +766,7 @@ async def _handle_discovery_result(data: dict):
                     account_id=account_id,
                     symbol=ticker.upper(),
                     added_by="auto_discovery",
-                    added_at=datetime.datetime.utcnow(),
+                    added_at=clock.now(),
                     active=1,
                 ))
                 session.add(WatchlistEvent(
@@ -929,7 +930,7 @@ async def _handle_prune_result(data: dict):
                     )
                     .values(
                         active=0,
-                        removed_at=datetime.datetime.utcnow(),
+                        removed_at=clock.now(),
                         remove_reason=reasoning,
                     )
                 )
@@ -1000,7 +1001,7 @@ async def _handle_rank_prune_result(data: dict):
                 )
                 .values(
                     active=0,
-                    removed_at=datetime.datetime.utcnow(),
+                    removed_at=clock.now(),
                     remove_reason=reasoning,
                 )
             )
@@ -1158,7 +1159,7 @@ async def _on_debounce_fire(account_id: str, tickers: list[str]):
 async def _prune_scheduler():
     """Run daily prune at 04:00 UTC for all accounts with auto_prune enabled."""
     while True:
-        now = datetime.datetime.utcnow()
+        now = clock.now()
         target = now.replace(hour=4, minute=0, second=0, microsecond=0)
         if target <= now:
             target += datetime.timedelta(days=1)
@@ -1234,7 +1235,7 @@ async def _merge_scheduler():
         if not _config or not _scheduler:
             continue
 
-        now = datetime.datetime.utcnow()
+        now = clock.now()
         weekday = now.weekday()  # 0=Mon
         current_time = now.strftime("%H:%M")
         date_key = now.strftime("%Y-%m-%d")
@@ -1504,7 +1505,7 @@ async def _insert_article_silent(article: dict) -> int | None:
                 datetime.datetime.fromisoformat(article["published_at"])
                 if article.get("published_at") else None
             ),
-            received_at=datetime.datetime.utcnow(),
+            received_at=clock.now(),
             status=InvestigationStatus.queued,
         )
         session.add(db_article)
@@ -1685,7 +1686,7 @@ async def _yfinance_poller():
                     )
 
                     _news_source_health["yfinance"]["last_poll_at"] = (
-                        datetime.datetime.utcnow().isoformat()
+                        clock.now().isoformat()
                     )
                     _news_source_health["yfinance"]["consecutive_failures"] = 0
 

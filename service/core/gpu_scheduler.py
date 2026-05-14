@@ -6,6 +6,7 @@ from typing import Optional
 
 import redis.asyncio as aioredis
 
+from service import clock
 from service.config import ProviderConfig
 from service.core.provider_router import ProviderRouter
 
@@ -54,7 +55,7 @@ class GpuScheduler:
             "payload": spec.payload,
             "ticker": spec.ticker,
             "priority": spec.priority,
-            "created_at": datetime.datetime.utcnow().isoformat(),
+            "created_at": clock.now().isoformat(),
         }
 
         if provider and provider in self._providers:

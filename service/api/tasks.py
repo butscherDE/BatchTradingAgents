@@ -213,7 +213,7 @@ async def cancel_task(task_id: str, session: AsyncSession = Depends(get_session)
 async def cancel_all_queued(session: AsyncSession = Depends(get_session)):
     """Cancel all queued tasks. Running tasks are not affected."""
     from sqlalchemy import update
-    import datetime
+    from service import clock
 
     # Clear Redis queues
     from service.app import get_scheduler
@@ -224,7 +224,7 @@ async def cancel_all_queued(session: AsyncSession = Depends(get_session)):
     result = await session.execute(
         update(GpuTask)
         .where(GpuTask.status == TaskStatus.queued)
-        .values(status=TaskStatus.cancelled, completed_at=datetime.datetime.utcnow())
+        .values(status=TaskStatus.cancelled, completed_at=clock.now())
     )
     await session.commit()
 

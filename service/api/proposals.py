@@ -9,6 +9,8 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from service import clock
+
 from service.db.models import TradeProposal, ProposalStatus
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
@@ -175,7 +177,7 @@ async def approve_proposal(proposal_id: int, session: AsyncSession = Depends(get
             )
 
     proposal.status = ProposalStatus.approved
-    proposal.decided_at = datetime.datetime.utcnow()
+    proposal.decided_at = clock.now()
     proposal.execution_results = execution_results
     await session.commit()
 
@@ -203,7 +205,7 @@ async def reject_proposal(proposal_id: int, session: AsyncSession = Depends(get_
         raise HTTPException(status_code=409, detail=f"Proposal is '{status_val}', not 'pending'")
 
     proposal.status = ProposalStatus.rejected
-    proposal.decided_at = datetime.datetime.utcnow()
+    proposal.decided_at = clock.now()
     await session.commit()
 
     return {"status": "rejected"}

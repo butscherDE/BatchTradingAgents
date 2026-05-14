@@ -8,6 +8,8 @@ import time
 from functools import partial
 from pathlib import Path
 
+from service import clock
+
 import redis
 
 from service.config import load_config, ServiceConfig, ProviderConfig
@@ -90,7 +92,7 @@ class OllamaWorker:
 
         self._publish_status("executing", f"{task_type} for {ticker or 'N/A'}")
 
-        started_at = datetime.datetime.utcnow().isoformat()
+        started_at = clock.now().isoformat()
 
         self._push_result({
             "task_id": task_id,
@@ -120,7 +122,7 @@ class OllamaWorker:
                             "status": "failed",
                             "error": "Cancelled by user",
                             "started_at": started_at,
-                            "completed_at": datetime.datetime.utcnow().isoformat(),
+                            "completed_at": clock.now().isoformat(),
                         })
                         return
 
@@ -131,9 +133,9 @@ class OllamaWorker:
                 "status": "completed",
                 "result": result,
                 "started_at": started_at,
-                "completed_at": datetime.datetime.utcnow().isoformat(),
+                "completed_at": clock.now().isoformat(),
             })
-            completed_at = datetime.datetime.utcnow()
+            completed_at = clock.now()
             duration = (completed_at - datetime.datetime.fromisoformat(started_at)).total_seconds()
             record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "completed", duration)
         except Exception as e:
@@ -146,9 +148,9 @@ class OllamaWorker:
                 "status": "failed",
                 "error": error_detail,
                 "started_at": started_at,
-                "completed_at": datetime.datetime.utcnow().isoformat(),
+                "completed_at": clock.now().isoformat(),
             })
-            duration = (datetime.datetime.utcnow() - datetime.datetime.fromisoformat(started_at)).total_seconds()
+            duration = (clock.now() - datetime.datetime.fromisoformat(started_at)).total_seconds()
             record_task_completed(task_type, self.provider_name, task.get("model_tier", "quick"), ticker, "failed", duration)
         finally:
             executor.shutdown(wait=False)
@@ -297,12 +299,13 @@ class OllamaWorker:
         result = run_single_ticker(
             ticker=ticker,
             config=config,
+            analysis_date=clock.today(),
             past_context=payload.get("past_context", ""),
         )
 
         final_state = result["final_state"]
 
-        analysis_date = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        analysis_date = clock.today()
         fs_ticker = ticker.replace(":", "_")
         reports_dir = Path("reports") / f"{fs_ticker}_{analysis_date}"
         try:
@@ -315,7 +318,7 @@ class OllamaWorker:
         state_dir.mkdir(parents=True, exist_ok=True)
         state_file = state_dir / f"{fs_ticker}.json"
         serializable_state = {
-            "generated_at": datetime.datetime.utcnow().isoformat(),
+            "generated_at": clock.now().isoformat(),
             "final_trade_decision": final_state.get("final_trade_decision", ""),
             "market_report": final_state.get("market_report", ""),
             "news_report": final_state.get("news_report", ""),
@@ -500,7 +503,7 @@ class OllamaWorker:
             "task_count": self._task_count,
             "model_switches": self._model_switches,
             "provider": self.provider_name,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": clock.now().isoformat(),
         }
         self._redis.set(self._status_key, json.dumps(status))
         self._redis.publish(STATUS_CHANNEL, json.dumps(status))
