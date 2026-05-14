@@ -356,6 +356,7 @@ class OllamaWorker:
             deep_model=self.provider_config.deep_model,
             backend_url=ollama_base,
         )
+        config["llm_timeout"] = 3600
 
         ticker_results = [
             (t["ticker"], t["decision"], t["final_state"])

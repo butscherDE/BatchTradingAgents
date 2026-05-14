@@ -225,6 +225,7 @@ class RemoteWorker:
         )
         if self.provider_config.api_key:
             config["api_key"] = self.provider_config.api_key
+        config["llm_timeout"] = 3600
 
         ticker_results = [
             (t["ticker"], t["decision"], t["final_state"])
