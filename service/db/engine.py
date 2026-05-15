@@ -1,17 +1,27 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import Session, sessionmaker
 
 from service.db.models import Base
 
 
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL")
+    cursor.execute("PRAGMA busy_timeout=5000")
+    cursor.execute("PRAGMA synchronous=NORMAL")
+    cursor.close()
+
+
 def get_async_engine(db_path: str):
     path = Path(db_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite+aiosqlite:///{path}"
-    return create_async_engine(url, echo=False)
+    engine = create_async_engine(url, echo=False)
+    event.listen(engine.sync_engine, "connect", _set_sqlite_pragmas)
+    return engine
 
 
 def get_sync_engine(db_path: str):
@@ -19,9 +29,7 @@ def get_sync_engine(db_path: str):
     path.parent.mkdir(parents=True, exist_ok=True)
     url = f"sqlite:///{path}"
     engine = create_engine(url, echo=False)
-    with engine.connect() as conn:
-        conn.execute(__import__("sqlalchemy").text("PRAGMA journal_mode=WAL"))
-        conn.commit()
+    event.listen(engine, "connect", _set_sqlite_pragmas)
     return engine
 
 

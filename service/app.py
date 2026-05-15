@@ -1689,6 +1689,7 @@ async def _yfinance_poller():
                         clock.now().isoformat()
                     )
                     _news_source_health["yfinance"]["consecutive_failures"] = 0
+                    _news_source_health["yfinance"]["last_error"] = None
 
                     new_articles = []
                     for article_data in articles:
