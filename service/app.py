@@ -215,6 +215,10 @@ async def lifespan(app: FastAPI):
     if _config.polling.yfinance_enabled:
         yfinance_task = asyncio.create_task(_yfinance_poller())
 
+    # Trade fill reconciler
+    from service.core.trade_reconciler import reconcile_loop
+    trade_reconcile_task = asyncio.create_task(reconcile_loop(get_db_session, _config))
+
     logger.info(f"Service started on {_config.host}:{_config.port}")
     yield
 
@@ -223,6 +227,7 @@ async def lifespan(app: FastAPI):
     merge_sched_task.cancel()
     if yfinance_task:
         yfinance_task.cancel()
+    trade_reconcile_task.cancel()
 
     # Shutdown
     if result_task:
@@ -1810,6 +1815,7 @@ def create_app() -> FastAPI:
     from service.api.holdings import router as holdings_router
     from service.api.watchlist import router as watchlist_router
     from service.api.proposals import router as proposals_router
+    from service.api.trades import router as trades_router
     from service.api.ws import router as ws_router
     from service.api.status import router as status_router
 
@@ -1818,6 +1824,7 @@ def create_app() -> FastAPI:
     app.include_router(holdings_router)
     app.include_router(watchlist_router)
     app.include_router(proposals_router)
+    app.include_router(trades_router)
     app.include_router(ws_router)
     app.include_router(status_router)
 

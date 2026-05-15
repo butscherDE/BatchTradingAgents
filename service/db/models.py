@@ -68,15 +68,23 @@ class TradeAction(Base):
     __tablename__ = "trade_actions"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    account_id = Column(String, nullable=False)
-    ticker = Column(String, nullable=False)
-    action = Column(String, nullable=False)  # "sell_emergency", "buy", "sell"
+    account_id = Column(String, nullable=False, index=True)
+    ticker = Column(String, nullable=False, index=True)
+    action = Column(String, nullable=False)  # "buy", "sell", "sell_emergency"
     qty = Column(Float, nullable=True)
+    notional = Column(Float, nullable=True)
+    trigger = Column(String, nullable=False, default="manual")  # "proposal", "emergency_sell", "manual"
     trigger_reason = Column(Text, nullable=True)
+    proposal_id = Column(Integer, nullable=True, index=True)
     report_id = Column(Integer, nullable=True)
     order_id = Column(String, nullable=True)
     status = Column(String, nullable=False, default="pending")
+    error = Column(Text, nullable=True)
     submitted_at = Column(DateTime, nullable=False, default=datetime.datetime.utcnow)
+    filled_qty = Column(Float, nullable=True)
+    filled_avg_price = Column(Float, nullable=True)
+    filled_at = Column(DateTime, nullable=True)
+    last_synced_at = Column(DateTime, nullable=True)
 
 
 class WatchlistTicker(Base):

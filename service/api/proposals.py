@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from service import clock
 
-from service.db.models import TradeProposal, ProposalStatus
+from service.db.models import TradeAction, TradeProposal, ProposalStatus
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -176,8 +176,27 @@ async def approve_proposal(proposal_id: int, session: AsyncSession = Depends(get
                 _execute_orders, acct, orders
             )
 
+    # Persist a TradeAction row per submitted order (success or failure)
+    submitted_at = clock.now()
+    for order, result in zip(orders, execution_results):
+        err = result.get("error")
+        status_str = result.get("status") or ("failed" if err else "submitted")
+        session.add(TradeAction(
+            account_id=proposal.account_id,
+            ticker=order.get("ticker", "").upper(),
+            action=order.get("side") or result.get("side") or "buy",
+            qty=order.get("qty"),
+            notional=order.get("notional"),
+            trigger="proposal",
+            proposal_id=proposal.id,
+            order_id=result.get("order_id"),
+            status=status_str,
+            error=err,
+            submitted_at=submitted_at,
+        ))
+
     proposal.status = ProposalStatus.approved
-    proposal.decided_at = clock.now()
+    proposal.decided_at = submitted_at
     proposal.execution_results = execution_results
     await session.commit()
 

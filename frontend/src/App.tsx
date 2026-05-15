@@ -6,6 +6,7 @@ import Holdings from './pages/Holdings'
 import Tasks from './pages/Tasks'
 import Watchlist from './pages/Watchlist'
 import Proposals from './pages/Proposals'
+import Trades from './pages/Trades'
 import Login from './pages/Login'
 import { WebSocketProvider, useWebSocket } from './api/websocket'
 import { fetchJson, NewsSourceStatus } from './api/client'
@@ -50,9 +51,10 @@ function Sidebar() {
       <h2>TradingAgents</h2>
       <NavLink to="/">News</NavLink>
       <NavLink to="/proposals" className="nav-with-badge">
-        Trades
+        Proposals
         {pendingCount > 0 && <span className="nav-badge">{pendingCount}</span>}
       </NavLink>
+      <NavLink to="/trades">Trades</NavLink>
       <NavLink to="/watchlist">Watchlist</NavLink>
       <NavLink to="/accounts">Accounts</NavLink>
       <NavLink to="/holdings">Holdings</NavLink>
@@ -103,6 +105,7 @@ export default function App() {
           <Routes>
             <Route path="/" element={<NewsFeed />} />
             <Route path="/proposals" element={<Proposals />} />
+            <Route path="/trades" element={<Trades />} />
             <Route path="/watchlist" element={<Watchlist />} />
             <Route path="/accounts" element={<Accounts />} />
             <Route path="/holdings" element={<Holdings />} />

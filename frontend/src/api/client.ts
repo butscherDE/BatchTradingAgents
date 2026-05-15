@@ -116,6 +116,24 @@ export interface NewsSourceStatus {
   }
 }
 
+export interface Trade {
+  id: number
+  account_id: string
+  ticker: string
+  action: string
+  qty: number | null
+  notional: number | null
+  trigger: string
+  proposal_id: number | null
+  order_id: string | null
+  status: string
+  error: string | null
+  submitted_at: string
+  filled_qty: number | null
+  filled_avg_price: number | null
+  filled_at: string | null
+}
+
 export const api = {
   getNews: (params?: { limit?: string; status?: string; symbol?: string }) =>
     fetchJson<NewsArticle[]>('/api/news', params),
@@ -140,4 +158,7 @@ export const api = {
 
   getNewsSourceStatus: () =>
     fetchJson<NewsSourceStatus>('/api/status/news-sources'),
+
+  getTrades: (params?: { account_id?: string; ticker?: string; status?: string; trigger?: string; limit?: string }) =>
+    fetchJson<Trade[]>('/api/trades', params),
 }
