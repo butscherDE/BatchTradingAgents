@@ -28,6 +28,8 @@ _debouncer: MergeDebouncer | None = None
 _latest_reports: dict[str, dict] = {}  # ticker -> latest analysis result
 _orphaned_tasks: list = []  # tasks recovered from crash
 _merge_schedules: dict[str, dict] = {}  # account_id -> {days, times, enabled}
+_freshness_policies: dict[str, dict] = {}  # account_id -> {enabled, watchlist, owned_lt_25, ...}
+_holdings_cache: dict[str, tuple[float, list]] = {}  # account_id -> (timestamp, holdings)
 
 _news_source_health: dict = {
     "alpaca": {
@@ -210,6 +212,9 @@ async def lifespan(app: FastAPI):
     # Merge+allocate scheduler
     merge_sched_task = asyncio.create_task(_merge_scheduler())
 
+    # Freshness policy scheduler
+    freshness_task = asyncio.create_task(_freshness_scheduler())
+
     # yfinance periodic news poller
     yfinance_task = None
     if _config.polling.yfinance_enabled:
@@ -225,6 +230,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     prune_task.cancel()
     merge_sched_task.cancel()
+    freshness_task.cancel()
     if yfinance_task:
         yfinance_task.cancel()
     trade_reconcile_task.cancel()
@@ -1322,6 +1328,164 @@ async def _merge_scheduler():
                         )
                     except Exception as e:
                         logger.error(f"Scheduled merge failed for {account_id}: {e}")
+
+
+# --- Freshness policy ---
+
+_FRESHNESS_FILE = "data/freshness_policies.json"
+_FRESHNESS_DEFAULT = {
+    "enabled": False,
+    "watchlist": "",
+    "owned_lt_25": "",
+    "owned_lt_50": "",
+    "owned_gte_50": "",
+}
+_HOLDINGS_TTL_SECONDS = 300
+
+
+def _load_freshness_policies():
+    import json
+    from pathlib import Path
+    global _freshness_policies
+    p = Path(_FRESHNESS_FILE)
+    if p.exists():
+        try:
+            _freshness_policies = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            _freshness_policies = {}
+
+
+def _save_freshness_policies():
+    import json
+    from pathlib import Path
+    p = Path(_FRESHNESS_FILE)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(_freshness_policies, indent=2), encoding="utf-8")
+
+
+def get_freshness_policy(account_id: str) -> dict:
+    return {**_FRESHNESS_DEFAULT, **_freshness_policies.get(account_id, {})}
+
+
+def set_freshness_policy(account_id: str, data: dict):
+    _freshness_policies[account_id] = {
+        "enabled": bool(data.get("enabled", False)),
+        "watchlist": str(data.get("watchlist", "")).strip(),
+        "owned_lt_25": str(data.get("owned_lt_25", "")).strip(),
+        "owned_lt_50": str(data.get("owned_lt_50", "")).strip(),
+        "owned_gte_50": str(data.get("owned_gte_50", "")).strip(),
+    }
+    _save_freshness_policies()
+
+
+async def _get_holdings_cached(account_id: str, acct) -> dict[str, float]:
+    """Return {symbol: portfolio_pct} for an account, cached for ~5 min."""
+    import time as _time
+    from service.api.holdings import _fetch_holdings_sync
+
+    now = _time.time()
+    cached = _holdings_cache.get(account_id)
+    if cached and (now - cached[0]) < _HOLDINGS_TTL_SECONDS:
+        return cached[1]
+
+    _, holdings = await asyncio.to_thread(_fetch_holdings_sync, account_id, acct)
+    pct_by_symbol = {h.symbol: h.portfolio_pct for h in holdings}
+    _holdings_cache[account_id] = (now, pct_by_symbol)
+    return pct_by_symbol
+
+
+async def _freshness_scheduler():
+    """Every 60s, enqueue full_analysis for stale watchlist reports per account policy."""
+    import time as _time
+    from sqlalchemy import select
+    from service.api.watchlist import _get_report_mtime
+    from service.core.freshness import parse_duration, tier_for_pct
+    from service.core.gpu_scheduler import TaskSpec
+    from service.db.models import GpuTask, TaskStatus, WatchlistTicker
+
+    _load_freshness_policies()
+
+    while True:
+        await asyncio.sleep(60)
+
+        if not _config or not _scheduler:
+            continue
+
+        now_ts = _time.time()
+
+        for account_id, acct in _config.accounts.items():
+            policy = get_freshness_policy(account_id)
+            if not policy.get("enabled"):
+                continue
+
+            try:
+                thresholds = {
+                    tier: parse_duration(policy.get(tier, ""))
+                    for tier in ("watchlist", "owned_lt_25", "owned_lt_50", "owned_gte_50")
+                }
+            except ValueError as e:
+                logger.warning(f"Freshness policy parse error for {account_id}: {e}")
+                continue
+
+            if not any(thresholds.values()):
+                continue
+
+            try:
+                pct_by_symbol = await _get_holdings_cached(account_id, acct)
+            except Exception as e:
+                logger.warning(f"Freshness scheduler: holdings fetch failed for {account_id}: {e}")
+                continue
+
+            async with get_db_session() as session:
+                result = await session.execute(
+                    select(WatchlistTicker.symbol).where(
+                        WatchlistTicker.account_id == account_id,
+                        WatchlistTicker.active == 1,
+                    )
+                )
+                symbols = list(result.scalars().all())
+
+                for sym in symbols:
+                    tier = tier_for_pct(pct_by_symbol.get(sym))
+                    threshold = thresholds.get(tier)
+                    if threshold is None:
+                        continue
+
+                    mtime = _get_report_mtime(sym)
+                    if mtime is not None and (now_ts - mtime) <= threshold:
+                        continue
+
+                    inflight = await session.execute(
+                        select(GpuTask.id).where(
+                            GpuTask.task_type == "full_analysis",
+                            GpuTask.ticker == sym,
+                            GpuTask.status.in_([TaskStatus.queued, TaskStatus.running]),
+                        ).limit(1)
+                    )
+                    if inflight.scalar_one_or_none() is not None:
+                        continue
+
+                    try:
+                        task_id = await _scheduler.submit(TaskSpec(
+                            model_tier="deep",
+                            task_type="full_analysis",
+                            payload={"ticker": sym, "account_id": account_id},
+                            ticker=sym,
+                            priority=1,
+                        ))
+                        session.add(GpuTask(
+                            task_id=task_id,
+                            model_tier="deep",
+                            task_type="full_analysis",
+                            ticker=sym,
+                            priority=1,
+                            status=TaskStatus.queued,
+                            payload={"ticker": sym, "account_id": account_id},
+                        ))
+                        await session.commit()
+                        logger.info(f"Freshness: enqueued full_analysis for {sym} (account={account_id}, tier={tier})")
+                    except Exception as e:
+                        logger.error(f"Freshness: failed to enqueue {sym} for {account_id}: {e}")
 
 
 async def _trigger_merge_for_account(account_id: str, acct, merge_checks: int = None, allocation_checks: int = None, provider: str = None, auto_approve: bool = False):

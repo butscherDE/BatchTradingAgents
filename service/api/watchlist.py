@@ -204,6 +204,39 @@ async def get_watchlist_config():
     }
 
 
+class FreshnessPolicyBody(BaseModel):
+    enabled: bool = False
+    watchlist: str = ""
+    owned_lt_25: str = ""
+    owned_lt_50: str = ""
+    owned_gte_50: str = ""
+
+
+@router.get("/freshness", response_model=FreshnessPolicyBody)
+async def get_freshness_policy_endpoint(account_id: str = Query(...)):
+    from service.app import get_freshness_policy
+    policy = get_freshness_policy(account_id)
+    return FreshnessPolicyBody(**policy)
+
+
+@router.put("/freshness", response_model=FreshnessPolicyBody)
+async def set_freshness_policy_endpoint(
+    body: FreshnessPolicyBody,
+    account_id: str = Query(...),
+):
+    from service.app import set_freshness_policy
+    from service.core.freshness import parse_duration
+
+    for field in ("watchlist", "owned_lt_25", "owned_lt_50", "owned_gte_50"):
+        try:
+            parse_duration(getattr(body, field))
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"{field}: {e}")
+
+    set_freshness_policy(account_id, body.model_dump())
+    return body
+
+
 class WatchlistEventResponse(BaseModel):
     id: int
     account_id: str
@@ -305,23 +338,26 @@ async def trigger_analysis(
     return {"submitted": submitted, "count": len(submitted)}
 
 
-def _get_report_times(symbols: list[str]) -> dict[str, str]:
+def _get_report_mtime(symbol: str) -> Optional[float]:
+    """Return the mtime of the on-disk report for a ticker, or None if missing."""
     from pathlib import Path
-    import time
 
-    state_dir = Path("reports") / "_states"
-    if not state_dir.exists():
-        return {}
+    fs_sym = symbol.replace(":", "_")
+    state_file = Path("reports") / "_states" / f"{fs_sym}.json"
+    if not state_file.exists():
+        return None
+    return state_file.stat().st_mtime
+
+
+def _get_report_times(symbols: list[str]) -> dict[str, str]:
+    import time
 
     now = time.time()
     result = {}
     for sym in symbols:
-        fs_sym = sym.replace(":", "_")
-        state_file = state_dir / f"{fs_sym}.json"
-        if state_file.exists():
-            mtime = state_file.stat().st_mtime
-            delta = now - mtime
-            result[sym] = _format_relative_time(delta)
+        mtime = _get_report_mtime(sym)
+        if mtime is not None:
+            result[sym] = _format_relative_time(now - mtime)
     return result
 
 

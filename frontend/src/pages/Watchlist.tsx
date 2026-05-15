@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
-import { fetchJson, AccountSummary, api } from '../api/client'
+import { fetchJson, AccountSummary, api, FreshnessPolicy } from '../api/client'
 import { useWebSocket } from '../api/websocket'
 import { parseUtc } from '../api/time'
 import TickerSearch from '../components/TickerSearch'
@@ -106,6 +106,37 @@ export default function Watchlist() {
     },
   })
 
+  const { data: policyServer } = useQuery({
+    queryKey: ['freshnessPolicy', accountId],
+    queryFn: () => api.getFreshnessPolicy(accountId),
+    enabled: !!accountId,
+  })
+
+  const [policyDraft, setPolicyDraft] = useState<FreshnessPolicy>({
+    enabled: false, watchlist: '', owned_lt_25: '', owned_lt_50: '', owned_gte_50: '',
+  })
+
+  useEffect(() => {
+    if (policyServer) setPolicyDraft(policyServer)
+  }, [policyServer])
+
+  const policyMutation = useMutation({
+    mutationFn: (body: FreshnessPolicy) => api.setFreshnessPolicy(accountId, body),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['freshnessPolicy', accountId] }),
+  })
+
+  const validateDuration = (s: string): string | null => {
+    if (!s.trim()) return null
+    return /^\s*\d+\s*[smhd]?\s*$/i.test(s) ? null : 'invalid (use 30s/30m/2h/3d)'
+  }
+  const policyErrors: Record<keyof Omit<FreshnessPolicy, 'enabled'>, string | null> = {
+    watchlist: validateDuration(policyDraft.watchlist),
+    owned_lt_25: validateDuration(policyDraft.owned_lt_25),
+    owned_lt_50: validateDuration(policyDraft.owned_lt_50),
+    owned_gte_50: validateDuration(policyDraft.owned_gte_50),
+  }
+  const policyHasError = Object.values(policyErrors).some(e => e !== null)
+
   const analyzeSelected = () => {
     if (selected.size === 0) return
     const symbols = Array.from(selected)
@@ -164,6 +195,67 @@ export default function Watchlist() {
           </div>
         </div>
       </div>
+
+      {accountId && (
+        <div className="stat-card" style={{ marginBottom: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, marginBottom: 10 }}>
+            <h3 style={{ margin: 0 }}>Update Policy</h3>
+            <label style={{ fontSize: 13, color: 'var(--text-dim)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                type="checkbox"
+                checked={policyDraft.enabled}
+                onChange={e => setPolicyDraft({ ...policyDraft, enabled: e.target.checked })}
+              />
+              enabled
+            </label>
+            <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>
+              max report age per tier — leave blank to disable a tier
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+            {([
+              ['watchlist', 'Watchlist (not owned)'],
+              ['owned_lt_25', 'Owned < 25%'],
+              ['owned_lt_50', 'Owned 25–50%'],
+              ['owned_gte_50', 'Owned ≥ 50%'],
+            ] as [keyof Omit<FreshnessPolicy, 'enabled'>, string][]).map(([key, label]) => (
+              <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <label style={{ fontSize: 12, color: 'var(--text-dim)' }}>{label}</label>
+                <input
+                  type="text"
+                  placeholder="e.g. 2h"
+                  value={policyDraft[key]}
+                  onChange={e => setPolicyDraft({ ...policyDraft, [key]: e.target.value })}
+                  style={{
+                    padding: '6px 8px',
+                    fontSize: 13,
+                    borderColor: policyErrors[key] ? 'var(--red)' : undefined,
+                  }}
+                />
+                {policyErrors[key] && (
+                  <span style={{ fontSize: 11, color: 'var(--red)' }}>{policyErrors[key]}</span>
+                )}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
+            <button
+              onClick={() => policyMutation.mutate(policyDraft)}
+              disabled={policyHasError || policyMutation.isPending}
+            >
+              {policyMutation.isPending ? 'Saving...' : 'Save Policy'}
+            </button>
+            {policyMutation.isError && (
+              <span style={{ fontSize: 12, color: 'var(--red)' }}>
+                {(policyMutation.error as Error).message}
+              </span>
+            )}
+            {policyMutation.isSuccess && !policyMutation.isPending && (
+              <span style={{ fontSize: 12, color: 'var(--text-dim)' }}>saved</span>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="filters" style={{ marginBottom: 16 }}>
         <TickerSearch

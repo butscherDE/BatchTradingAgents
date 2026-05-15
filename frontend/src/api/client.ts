@@ -134,6 +134,14 @@ export interface Trade {
   filled_at: string | null
 }
 
+export interface FreshnessPolicy {
+  enabled: boolean
+  watchlist: string
+  owned_lt_25: string
+  owned_lt_50: string
+  owned_gte_50: string
+}
+
 export const api = {
   getNews: (params?: { limit?: string; status?: string; symbol?: string }) =>
     fetchJson<NewsArticle[]>('/api/news', params),
@@ -161,4 +169,20 @@ export const api = {
 
   getTrades: (params?: { account_id?: string; ticker?: string; status?: string; trigger?: string; limit?: string }) =>
     fetchJson<Trade[]>('/api/trades', params),
+
+  getFreshnessPolicy: (accountId: string) =>
+    fetchJson<FreshnessPolicy>(`/api/watchlist/freshness?account_id=${encodeURIComponent(accountId)}`),
+
+  setFreshnessPolicy: async (accountId: string, body: FreshnessPolicy): Promise<FreshnessPolicy> => {
+    const res = await fetch(`/api/watchlist/freshness?account_id=${encodeURIComponent(accountId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}))
+      throw new Error(d.detail || `${res.status} ${res.statusText}`)
+    }
+    return res.json()
+  },
 }
