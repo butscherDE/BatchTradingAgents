@@ -71,7 +71,6 @@ class ServiceConfig(BaseSettings):
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
     providers: dict[str, ProviderConfig] = Field(default_factory=dict)
-    news_symbols: list[str] = Field(default_factory=lambda: ["*"])
 
 
 def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
@@ -88,7 +87,6 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     eval_raw = raw.get("evaluation", {})
     service_raw = raw.get("service", {})
     accounts_raw = raw.get("accounts", {})
-    streams_raw = raw.get("streams", {})
     db_raw = raw.get("database", {})
     redis_raw = raw.get("redis", {})
     polling_raw = raw.get("polling", {})
@@ -147,7 +145,6 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
         metrics=MetricsConfig(**metrics_raw),
         accounts=accounts,
         providers=providers,
-        news_symbols=streams_raw.get("news_symbols", ["*"]),
     )
 
 

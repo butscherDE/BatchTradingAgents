@@ -35,7 +35,7 @@ class StreamManager:
             self._news_stream = AlpacaNewsStream(
                 api_key=account.api_key,
                 api_secret=account.api_secret,
-                symbols=self._config.news_symbols,
+                symbols=["*"],
                 on_news=self._on_news,
                 on_status=self._on_stream_status,
             )
