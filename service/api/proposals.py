@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from service import clock
 
 from service.db.models import TradeAction, TradeProposal, ProposalStatus
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/proposals", tags=["proposals"])
 
@@ -237,6 +240,14 @@ def _execute_orders(acct, orders: list[dict]) -> list[dict]:
 
     client = TradingClient(acct.api_key, acct.api_secret, paper=acct.is_paper)
     results = []
+
+    if orders:
+        try:
+            cancel_responses = client.cancel_orders()
+            count = len(cancel_responses) if cancel_responses else 0
+            logger.info(f"Cancelled {count} open orders before submitting proposal")
+        except Exception as e:
+            logger.warning(f"cancel_orders failed before proposal submission: {e}")
 
     for order in orders:
         try:
