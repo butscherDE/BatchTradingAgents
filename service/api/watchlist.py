@@ -87,12 +87,6 @@ async def add_ticker(body: AddTickerRequest, session: AsyncSession = Depends(get
     if not account_id:
         raise HTTPException(status_code=400, detail="account_id required")
 
-    # Check exclude list
-    from service.app import _config
-    if _config and _config.watchlist.exclude:
-        if symbol in {s.upper() for s in _config.watchlist.exclude}:
-            raise HTTPException(status_code=400, detail=f"'{symbol}' is on the exclude list")
-
     # Validate ticker exists
     import asyncio
     valid = await asyncio.to_thread(_validate_ticker, symbol)

@@ -58,8 +58,13 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-async def _seed_watchlist(config_tickers: list[str]):
-    """Seed per-account watchlists from TOML on first run. Respects removals."""
+async def _seed_watchlist():
+    """Load tickers from each account's watchlist file on every startup.
+
+    File-sourced tickers are upserted as active and marked added_by="config" so
+    they are protected from auto-prune. Rows previously marked "config" that are
+    no longer in the file are demoted to "manual" (becoming prune-eligible).
+    """
     from service.db.models import WatchlistTicker
     from sqlalchemy import select
 
@@ -68,33 +73,40 @@ async def _seed_watchlist(config_tickers: list[str]):
 
     async with get_db_session() as session:
         for account_name, account_config in _config.accounts.items():
-            # Load tickers for this account's named watchlist
-            tickers = set()
+            file_tickers: set[str] = set()
             try:
                 from cli.watchlist import load_watchlist
                 if account_config.watchlist:
                     wl = load_watchlist(account_config.watchlist)
-                    tickers.update(t.upper() for t in wl)
+                    file_tickers.update(t.upper() for t in wl)
             except Exception:
                 pass
 
-            # Also add any explicit config tickers
-            tickers.update(t.upper().strip() for t in config_tickers if t.strip())
-
-            for sym in sorted(tickers):
-                existing = await session.execute(
-                    select(WatchlistTicker).where(
-                        WatchlistTicker.account_id == account_name,
-                        WatchlistTicker.symbol == sym,
-                    )
+            existing_result = await session.execute(
+                select(WatchlistTicker).where(
+                    WatchlistTicker.account_id == account_name
                 )
-                if existing.scalar_one_or_none() is None:
+            )
+            existing_by_symbol = {row.symbol: row for row in existing_result.scalars().all()}
+
+            for sym in file_tickers:
+                row = existing_by_symbol.get(sym)
+                if row is None:
                     session.add(WatchlistTicker(
                         account_id=account_name,
                         symbol=sym,
                         added_by="config",
                         active=1,
                     ))
+                else:
+                    row.added_by = "config"
+                    row.active = 1
+                    row.removed_at = None
+                    row.remove_reason = None
+
+            for sym, row in existing_by_symbol.items():
+                if row.added_by == "config" and sym not in file_tickers:
+                    row.added_by = "manual"
 
         await session.commit()
 
@@ -145,8 +157,8 @@ async def lifespan(app: FastAPI):
     await init_db(engine, _config.database_path)
     _session_factory = get_async_session_factory(engine)
 
-    # Seed watchlist from config if DB is empty
-    await _seed_watchlist(_config.watchlist.tickers)
+    # Seed watchlist from watchlists.toml on every startup
+    await _seed_watchlist()
 
     # Recover orphaned tasks from previous crash
     await _recover_orphaned_tasks()
@@ -235,13 +247,6 @@ async def _handle_news_article(article: dict):
     if article.get("alpaca_id"):
         _news_source_health["alpaca"]["status"] = "connected"
         _news_source_health["alpaca"]["last_message_at"] = clock.now().isoformat()
-
-    # Skip excluded tickers entirely
-    if _config and _config.watchlist.exclude:
-        exclude_set = {s.upper() for s in _config.watchlist.exclude}
-        symbols = [s for s in symbols if s.upper() not in exclude_set]
-        if not symbols:
-            return
 
     # Check which accounts actively watch any of the article's symbols
     affected_accounts = []
@@ -921,6 +926,18 @@ async def _handle_prune_result(data: dict):
 
         async with get_db_session() as session:
             if should_remove:
+                existing = await session.execute(
+                    select(WatchlistTicker).where(
+                        WatchlistTicker.account_id == account_id,
+                        WatchlistTicker.symbol == ticker,
+                    )
+                )
+                row = existing.scalar_one_or_none()
+                if row is not None and row.added_by == "config":
+                    logger.info(f"Skipping prune of config-protected {ticker} ({account_id})")
+                    await session.commit()
+                    return
+
                 # Remove from watchlist
                 await session.execute(
                     update(WatchlistTicker)
@@ -993,6 +1010,17 @@ async def _handle_rank_prune_result(data: dict):
             continue
 
         async with get_db_session() as session:
+            existing = await session.execute(
+                select(WatchlistTicker).where(
+                    WatchlistTicker.account_id == account_id,
+                    WatchlistTicker.symbol == symbol,
+                )
+            )
+            row = existing.scalar_one_or_none()
+            if row is not None and row.added_by == "config":
+                logger.info(f"Skipping rank-prune of config-protected {symbol} ({account_id})")
+                continue
+
             await session.execute(
                 update(WatchlistTicker)
                 .where(
@@ -1359,16 +1387,25 @@ async def _run_prune_for_account(account_name: str, acct):
                 WatchlistTicker.active == 1,
             )
         )
-        watchlist_entries = list(result.scalars().all())
+        all_active = list(result.scalars().all())
 
-    if not watchlist_entries:
+    if not all_active:
         return
 
-    max_tickers = acct.max_watchlist
+    # Config-sourced tickers (from watchlist file) are protected from prune.
+    protected_count = sum(1 for e in all_active if e.added_by == "config")
+    watchlist_entries = [e for e in all_active if e.added_by != "config"]
 
-    # If already under limit, skip
-    if len(watchlist_entries) <= max_tickers:
-        logger.info(f"Prune: {account_name} has {len(watchlist_entries)}/{max_tickers} tickers, no prune needed")
+    max_tickers = acct.max_watchlist
+    prunable_budget = max(0, max_tickers - protected_count)
+
+    # If prunable count already fits the remaining budget, skip
+    if len(watchlist_entries) <= prunable_budget:
+        logger.info(
+            f"Prune: {account_name} has {len(all_active)} active "
+            f"({protected_count} config-protected, {len(watchlist_entries)} prunable) "
+            f"within budget {prunable_budget}, no prune needed"
+        )
         return
 
     # Get held positions (cannot be pruned)
@@ -1407,13 +1444,17 @@ async def _run_prune_for_account(account_name: str, acct):
             "recent_headlines": recent_headlines,
         })
 
-    logger.info(f"Prune: submitting rank-and-prune for {account_name} ({len(watchlist_entries)} tickers, limit {max_tickers}, {len(held_symbols)} held)")
+    logger.info(
+        f"Prune: submitting rank-and-prune for {account_name} "
+        f"({len(watchlist_entries)} prunable, {protected_count} config-protected, "
+        f"budget {prunable_budget}, {len(held_symbols)} held)"
+    )
 
     payload = {
         "account_id": account_name,
         "strategy": acct.strategy,
         "tickers": tickers_with_context,
-        "max_tickers": max_tickers,
+        "max_tickers": prunable_budget,
         "held_symbols": list(held_symbols),
     }
 

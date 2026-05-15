@@ -31,13 +31,6 @@ class EvaluationConfig(BaseSettings):
     allocation_checks: int = 1
 
 
-class WatchlistConfig(BaseSettings):
-    dynamic_discovery: bool = False
-    auto_prune: bool = False
-    tickers: list[str] = []
-    exclude: list[str] = []
-
-
 class PollingConfig(BaseSettings):
     yfinance_enabled: bool = True
     yfinance_interval_minutes: int = 30
@@ -74,7 +67,6 @@ class ServiceConfig(BaseSettings):
     auth_secret: str = "change-me-in-production"
     gpu: GpuConfig = Field(default_factory=GpuConfig)
     evaluation: EvaluationConfig = Field(default_factory=EvaluationConfig)
-    watchlist: WatchlistConfig = Field(default_factory=WatchlistConfig)
     polling: PollingConfig = Field(default_factory=PollingConfig)
     metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     accounts: dict[str, AccountConfig] = Field(default_factory=dict)
@@ -99,7 +91,6 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
     streams_raw = raw.get("streams", {})
     db_raw = raw.get("database", {})
     redis_raw = raw.get("redis", {})
-    watchlist_raw = raw.get("watchlist", {})
     polling_raw = raw.get("polling", {})
     auth_raw = raw.get("auth", {})
     providers_raw = raw.get("providers", {})
@@ -152,12 +143,6 @@ def load_config(config_path: Optional[Path] = None) -> ServiceConfig:
         auth_secret=auth_raw.get("secret", "change-me-in-production"),
         gpu=GpuConfig(**gpu_raw),
         evaluation=EvaluationConfig(**eval_raw),
-        watchlist=WatchlistConfig(
-            dynamic_discovery=watchlist_raw.get("dynamic_discovery", False),
-            auto_prune=watchlist_raw.get("auto_prune", False),
-            tickers=watchlist_raw.get("tickers", []),
-            exclude=watchlist_raw.get("exclude", []),
-        ),
         polling=PollingConfig(**polling_raw),
         metrics=MetricsConfig(**metrics_raw),
         accounts=accounts,
