@@ -98,6 +98,7 @@ class MergeSchedule(BaseModel):
     merge_checks: int = 2
     allocation_checks: int = 2
     provider: str = ""
+    auto_approve: bool = False
 
 
 @router.get("/schedule", response_model=list[MergeSchedule])
@@ -151,66 +152,81 @@ async def get_proposal(proposal_id: int, session: AsyncSession = Depends(get_ses
     )
 
 
-@router.post("/{proposal_id}/approve")
-async def approve_proposal(proposal_id: int, session: AsyncSession = Depends(get_session)):
-    result = await session.execute(
-        select(TradeProposal).where(TradeProposal.id == proposal_id)
-    )
-    proposal = result.scalar_one_or_none()
-    if not proposal:
-        raise HTTPException(status_code=404, detail="Proposal not found")
+async def _execute_proposal_approval(proposal_id: int) -> dict:
+    """Execute the orders of a pending proposal, write TradeAction rows, mark approved.
 
-    status_val = proposal.status.value if hasattr(proposal.status, "value") else proposal.status
-    if status_val != "pending":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Proposal is '{status_val}', not 'pending'. No orders submitted.",
-        )
-
-    # Execute orders
-    orders = proposal.proposed_orders or []
-    execution_results = []
-
-    if orders:
-        from service.app import _config
-        acct = _config.accounts.get(proposal.account_id) if _config else None
-        if acct:
-            execution_results = await asyncio.to_thread(
-                _execute_orders, acct, orders
-            )
-
-    # Persist a TradeAction row per submitted order (success or failure)
-    submitted_at = clock.now()
-    for order, result in zip(orders, execution_results):
-        err = result.get("error")
-        status_str = result.get("status") or ("failed" if err else "submitted")
-        session.add(TradeAction(
-            account_id=proposal.account_id,
-            ticker=order.get("ticker", "").upper(),
-            action=order.get("side") or result.get("side") or "buy",
-            qty=order.get("qty"),
-            notional=order.get("notional"),
-            trigger="proposal",
-            proposal_id=proposal.id,
-            order_id=result.get("order_id"),
-            status=status_str,
-            error=err,
-            submitted_at=submitted_at,
-        ))
-
-    proposal.status = ProposalStatus.approved
-    proposal.decided_at = submitted_at
-    proposal.execution_results = execution_results
-    await session.commit()
-
+    Returns one of:
+      - {"status": "approved", "execution_results": [...], "account_id": str}
+      - {"error": "not_found"}
+      - {"error": "not_pending", "current_status": str}
+    """
+    from service.app import get_db_session, _config
     from service.api.ws import broadcast
+
+    async with get_db_session() as session:
+        result = await session.execute(
+            select(TradeProposal).where(TradeProposal.id == proposal_id)
+        )
+        proposal = result.scalar_one_or_none()
+        if not proposal:
+            return {"error": "not_found"}
+
+        status_val = proposal.status.value if hasattr(proposal.status, "value") else proposal.status
+        if status_val != "pending":
+            return {"error": "not_pending", "current_status": status_val}
+
+        orders = proposal.proposed_orders or []
+        execution_results = []
+
+        if orders:
+            acct = _config.accounts.get(proposal.account_id) if _config else None
+            if acct:
+                execution_results = await asyncio.to_thread(_execute_orders, acct, orders)
+
+        submitted_at = clock.now()
+        for order, exec_result in zip(orders, execution_results):
+            err = exec_result.get("error")
+            status_str = exec_result.get("status") or ("failed" if err else "submitted")
+            session.add(TradeAction(
+                account_id=proposal.account_id,
+                ticker=order.get("ticker", "").upper(),
+                action=order.get("side") or exec_result.get("side") or "buy",
+                qty=order.get("qty"),
+                notional=order.get("notional"),
+                trigger="proposal",
+                proposal_id=proposal.id,
+                order_id=exec_result.get("order_id"),
+                status=status_str,
+                error=err,
+                submitted_at=submitted_at,
+            ))
+
+        account_id = proposal.account_id
+        proposal.status = ProposalStatus.approved
+        proposal.decided_at = submitted_at
+        proposal.execution_results = execution_results
+        await session.commit()
+
     await broadcast("proposal_approved", {
         "proposal_id": proposal_id,
-        "account_id": proposal.account_id,
+        "account_id": account_id,
         "order_count": len(execution_results),
     })
 
-    return {"status": "approved", "execution_results": execution_results}
+    return {"status": "approved", "execution_results": execution_results, "account_id": account_id}
+
+
+@router.post("/{proposal_id}/approve")
+async def approve_proposal(proposal_id: int):
+    res = await _execute_proposal_approval(proposal_id)
+    if res.get("error") == "not_found":
+        raise HTTPException(status_code=404, detail="Proposal not found")
+    if res.get("error") == "not_pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Proposal is '{res['current_status']}', not 'pending'. No orders submitted.",
+        )
+    return {"status": res["status"], "execution_results": res["execution_results"]}
 
 
 @router.post("/{proposal_id}/reject")
@@ -289,6 +305,7 @@ async def trigger_merge_allocate(
     merge_checks: Optional[int] = Query(default=None, description="Override merge validation passes"),
     allocation_checks: Optional[int] = Query(default=None, description="Override allocation validation passes"),
     provider: Optional[str] = Query(default=None, description="Force routing to a specific provider"),
+    auto_approve: bool = Query(default=False, description="Automatically approve the resulting proposal"),
     session: AsyncSession = Depends(get_session),
 ):
     """Manually trigger a merge+allocate for an account using latest reports on disk."""
@@ -366,7 +383,11 @@ async def trigger_merge_allocate(
         task_type="merge_and_allocate",
         priority=1,
         status=TaskStatus.queued,
-        payload={"account_id": account_id, "tickers": [t["ticker"] for t in tickers_data]},
+        payload={
+            "account_id": account_id,
+            "tickers": [t["ticker"] for t in tickers_data],
+            "auto_approve": auto_approve,
+        },
     )
     session.add(db_task)
     await session.commit()

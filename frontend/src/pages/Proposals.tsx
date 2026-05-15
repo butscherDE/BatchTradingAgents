@@ -43,6 +43,7 @@ interface MergeSchedule {
   merge_checks: number
   allocation_checks: number
   provider: string
+  auto_approve?: boolean
 }
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -114,6 +115,7 @@ export default function Proposals() {
   const [allocChecks, setAllocChecks] = useState(1)
   const [selectedAccount, setSelectedAccount] = useState('')
   const [selectedProvider, setSelectedProvider] = useState('')
+  const [runAutoApprove, setRunAutoApprove] = useState(false)
 
   // Schedule state
   const [schedAccount, setSchedAccount] = useState('')
@@ -122,6 +124,7 @@ export default function Proposals() {
   const [schedMergeChecks, setSchedMergeChecks] = useState(2)
   const [schedAllocChecks, setSchedAllocChecks] = useState(2)
   const [schedProvider, setSchedProvider] = useState('')
+  const [schedAutoApprove, setSchedAutoApprove] = useState(false)
 
   const { data: schedules = [], refetch: refetchSchedules } = useQuery({
     queryKey: ['mergeSchedules'],
@@ -169,6 +172,7 @@ export default function Proposals() {
       if (mergeChecks !== 1) params.set('merge_checks', String(mergeChecks))
       if (allocChecks !== 1) params.set('allocation_checks', String(allocChecks))
       if (selectedProvider) params.set('provider', selectedProvider)
+      if (runAutoApprove) params.set('auto_approve', 'true')
       return fetch(`/api/proposals/trigger?${params.toString()}`, { method: 'POST' }).then(async r => {
         if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Failed') }
         return r.json()
@@ -225,6 +229,16 @@ export default function Proposals() {
                     <option key={p.name} value={p.name}>{p.name}</option>
                   ))}
                 </select>
+
+                <span style={{ fontSize: 13 }}>Auto approve</span>
+                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={runAutoApprove}
+                    onChange={e => setRunAutoApprove(e.target.checked)}
+                  />
+                  {runAutoApprove ? 'yes' : 'no'}
+                </label>
               </div>
               <button
                 onClick={() => triggerMutation.mutate()}
@@ -256,12 +270,14 @@ export default function Proposals() {
                       setSchedMergeChecks(existing.merge_checks ?? 2)
                       setSchedAllocChecks(existing.allocation_checks ?? 2)
                       setSchedProvider(existing.provider ?? '')
+                      setSchedAutoApprove(Boolean(existing.auto_approve))
                     } else {
                       setSchedDays([0, 1, 2, 3, 4])
                       setSchedTimes('06:00, 09:00, 12:00')
                       setSchedMergeChecks(2)
                       setSchedAllocChecks(2)
                       setSchedProvider('')
+                      setSchedAutoApprove(false)
                     }
                   }}
                   style={{ fontSize: 13 }}
@@ -326,6 +342,16 @@ export default function Proposals() {
                     <option key={p.name} value={p.name}>{p.name}</option>
                   ))}
                 </select>
+
+                <span style={{ fontSize: 13 }}>Auto approve</span>
+                <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <input
+                    type="checkbox"
+                    checked={schedAutoApprove}
+                    onChange={e => setSchedAutoApprove(e.target.checked)}
+                  />
+                  {schedAutoApprove ? 'yes' : 'no'}
+                </label>
               </div>
               <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
                 <button
@@ -334,6 +360,7 @@ export default function Proposals() {
                     saveScheduleMutation.mutate({
                       account_id: schedAccount, days: schedDays, times, enabled: true,
                       merge_checks: schedMergeChecks, allocation_checks: schedAllocChecks, provider: schedProvider,
+                      auto_approve: schedAutoApprove,
                     })
                   }}
                   disabled={!schedAccount || !schedTimes.trim() || saveScheduleMutation.isPending}
@@ -392,7 +419,7 @@ export default function Proposals() {
                       {s.days.map(d => DAY_LABELS[d]).join(', ')} at {s.times.join(', ')}
                     </div>
                     <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 6 }}>
-                      Merge: {s.merge_checks ?? 2}x · Alloc: {s.allocation_checks ?? 2}x · Provider: {s.provider || 'auto'}
+                      Merge: {s.merge_checks ?? 2}x · Alloc: {s.allocation_checks ?? 2}x · Provider: {s.provider || 'auto'} · Auto-approve: {s.auto_approve ? 'yes' : 'no'}
                     </div>
                     <div style={{ display: 'flex', gap: 6 }}>
                       <button
@@ -403,6 +430,7 @@ export default function Proposals() {
                           setSchedMergeChecks(s.merge_checks ?? 2)
                           setSchedAllocChecks(s.allocation_checks ?? 2)
                           setSchedProvider(s.provider ?? '')
+                          setSchedAutoApprove(Boolean(s.auto_approve))
                         }}
                         style={{ fontSize: 11, padding: '3px 8px' }}
                       >

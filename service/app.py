@@ -712,6 +712,26 @@ async def _handle_merge_result(data: dict):
         "superseded_ids": old_ids,
     })
 
+    # Auto-approve if requested by the original trigger (Run Now / schedule)
+    auto_approve = False
+    async with get_db_session() as session:
+        task_row = await session.execute(
+            select(GpuTask).where(GpuTask.task_id == task_id)
+        )
+        gpu_task = task_row.scalar_one_or_none()
+        if gpu_task and gpu_task.payload:
+            auto_approve = bool(gpu_task.payload.get("auto_approve", False))
+
+    if auto_approve:
+        from service.api.proposals import _execute_proposal_approval
+        logger.info(f"Auto-approving proposal {proposal_id} for {account_id}")
+        try:
+            res = await _execute_proposal_approval(proposal_id)
+            if res.get("error"):
+                logger.warning(f"Auto-approve skipped for proposal {proposal_id}: {res['error']}")
+        except Exception as e:
+            logger.error(f"Auto-approve failed for proposal {proposal_id}: {e}")
+
 
 async def _handle_discovery_result(data: dict):
     """Process a watchlist discovery result — maybe add ticker to specific account."""
@@ -1298,12 +1318,13 @@ async def _merge_scheduler():
                             merge_checks=sched.get("merge_checks"),
                             allocation_checks=sched.get("allocation_checks"),
                             provider=sched.get("provider") or None,
+                            auto_approve=bool(sched.get("auto_approve", False)),
                         )
                     except Exception as e:
                         logger.error(f"Scheduled merge failed for {account_id}: {e}")
 
 
-async def _trigger_merge_for_account(account_id: str, acct, merge_checks: int = None, allocation_checks: int = None, provider: str = None):
+async def _trigger_merge_for_account(account_id: str, acct, merge_checks: int = None, allocation_checks: int = None, provider: str = None, auto_approve: bool = False):
     """Trigger a merge+allocate for an account (same logic as the /trigger endpoint)."""
     from service.db.models import GpuTask, TaskStatus, WatchlistTicker
     from sqlalchemy import select
@@ -1373,7 +1394,11 @@ async def _trigger_merge_for_account(account_id: str, acct, merge_checks: int = 
             task_type="merge_and_allocate",
             priority=1,
             status=TaskStatus.queued,
-            payload={"account_id": account_id, "tickers": [t["ticker"] for t in tickers_data]},
+            payload={
+                "account_id": account_id,
+                "tickers": [t["ticker"] for t in tickers_data],
+                "auto_approve": auto_approve,
+            },
         ))
         await session.commit()
 
